@@ -67,12 +67,22 @@ pub struct QueryResult {
     pub token_report: TokenReport,
 }
 
-/// Rough estimate of the tokens needed to read the full definitions of the
-/// given symbols (approximately 8 tokens per source line).
-fn estimate_full_tokens(views: &[ItemView]) -> usize {
-    views
+// Tokens an agent would spend reading the full source of every file the bundle
+// touches. Falls back to a per-line estimate when a file cannot be read.
+fn estimate_full_tokens(views: &[ItemView], counter: &dyn TokenCounter) -> usize {
+    let mut files: Vec<&str> = views.iter().map(|v| v.file.as_str()).collect();
+    files.sort_unstable();
+    files.dedup();
+    files
         .iter()
-        .map(|v| (v.line_end.saturating_sub(v.line_start) + 1) * 8)
+        .map(|f| match std::fs::read_to_string(f) {
+            Ok(content) => counter.count(&content),
+            Err(_) => views
+                .iter()
+                .filter(|v| v.file == *f)
+                .map(|v| (v.line_end.saturating_sub(v.line_start) + 1) * 8)
+                .sum(),
+        })
         .sum()
 }
 
@@ -101,7 +111,7 @@ fn assemble(views: Vec<ItemView>, budget: usize, counter: &dyn TokenCounter) -> 
         selected.push(view);
     }
 
-    let full_source_tokens = estimate_full_tokens(&selected);
+    let full_source_tokens = estimate_full_tokens(&selected, counter);
     let savings_ratio = if bundle_tokens == 0 {
         0.0
     } else {
