@@ -2,8 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
+use std::collections::HashMap;
+
 use crate::graph::Graph;
-use crate::model::NodeId;
+use crate::model::{Confidence, Edge, EdgeKind, NodeId};
 use crate::parser::rust::RustParser;
 use crate::parser::LanguageParser;
 
@@ -53,8 +55,8 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
     let mut graph = Graph::new();
     let mut counter: u32 = 0;
 
-    for file in files {
-        let content = match std::fs::read_to_string(&file) {
+    for file in &files {
+        let content = match std::fs::read_to_string(file) {
             Ok(c) => c,
             Err(_) => continue,
         };
@@ -70,6 +72,28 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
         }
     }
 
+    let mut name_to_id: HashMap<String, NodeId> = HashMap::new();
+    for node in graph.nodes() {
+        name_to_id.entry(node.name.clone()).or_insert(node.id);
+    }
+    for file in &files {
+        let Ok(content) = std::fs::read_to_string(file) else {
+            continue;
+        };
+        for (caller, callee) in RustParser::parse_calls(&content) {
+            if let (Some(&src), Some(&dst)) = (name_to_id.get(&caller), name_to_id.get(&callee)) {
+                if src != dst {
+                    graph.add_edge(Edge {
+                        src,
+                        dst,
+                        kind: EdgeKind::Calls,
+                        confidence: Confidence::Heuristic,
+                    });
+                }
+            }
+        }
+    }
+
     Ok(graph)
 }
 
@@ -82,10 +106,11 @@ mod tests {
         let dir = std::env::temp_dir().join("codegraph_builder_test");
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create dir");
-        std::fs::write(dir.join("sample.rs"), "struct A {}\nfn b() {}\n").expect("write file");
+        std::fs::write(dir.join("sample.rs"), "fn a() {}\nfn b() { a(); }\n").expect("write file");
 
         let graph = build_graph(&dir).expect("build failed");
         assert_eq!(graph.nodes().len(), 2);
+        assert!(!graph.edges().is_empty());
 
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }

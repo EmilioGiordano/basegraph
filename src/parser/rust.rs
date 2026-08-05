@@ -5,7 +5,8 @@
 use crate::model::{Node, NodeId, NodeKind};
 use quote::quote;
 use syn::spanned::Spanned;
-use syn::{Attribute, Expr, ExprLit, ImplItem, ImplItemFn, Item, Lit, Meta, MetaNameValue};
+use syn::visit::{self, Visit};
+use syn::{Attribute, Expr, ExprLit, ImplItem, ImplItemFn, Item, ItemFn, Lit, Meta, MetaNameValue};
 
 /// Parser for Rust source code.
 pub struct RustParser;
@@ -164,6 +165,54 @@ impl super::LanguageParser for RustParser {
         }
 
         Ok(nodes)
+    }
+}
+
+impl RustParser {
+    pub fn parse_calls(source: &str) -> Vec<(String, String)> {
+        let ast = match syn::parse_file(source) {
+            Ok(f) => f,
+            Err(_) => return Vec::new(),
+        };
+        let mut visitor = CallVisitor::default();
+        visitor.visit_file(&ast);
+        visitor.calls
+    }
+}
+
+#[derive(Default)]
+struct CallVisitor {
+    scope: Vec<String>,
+    calls: Vec<(String, String)>,
+}
+
+impl<'ast> Visit<'ast> for CallVisitor {
+    fn visit_item_fn(&mut self, node: &'ast ItemFn) {
+        self.scope.push(node.sig.ident.to_string());
+        visit::visit_item_fn(self, node);
+        self.scope.pop();
+    }
+
+    fn visit_impl_item_fn(&mut self, node: &'ast ImplItemFn) {
+        self.scope.push(node.sig.ident.to_string());
+        visit::visit_impl_item_fn(self, node);
+        self.scope.pop();
+    }
+
+    fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
+        if let (Some(caller), Expr::Path(path)) = (self.scope.last(), &*node.func) {
+            if let Some(seg) = path.path.segments.last() {
+                self.calls.push((caller.clone(), seg.ident.to_string()));
+            }
+        }
+        visit::visit_expr_call(self, node);
+    }
+
+    fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
+        if let Some(caller) = self.scope.last() {
+            self.calls.push((caller.clone(), node.method.to_string()));
+        }
+        visit::visit_expr_method_call(self, node);
     }
 }
 
