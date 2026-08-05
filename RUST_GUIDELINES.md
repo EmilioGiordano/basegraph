@@ -40,7 +40,7 @@
 
 ## Documentation & tests
 
-- `//!` module-level docs on each module; `///` doc comments on every public item.
+- **Comments minimal.** Do NOT put `///` doc comments on every item, and avoid line-by-line comments. Write self-explanatory code; comment only where the intent is genuinely non-obvious. A single short `//!` line per module is enough.
 - Unit tests in `#[cfg(test)] mod tests {}` next to the code; broader tests in `tests/`.
 - Test **edge cases**, not just the happy path (empty input, unparseable file, missing symbol,
   budget exceeded, cycles in the graph).
