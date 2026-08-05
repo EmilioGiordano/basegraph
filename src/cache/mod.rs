@@ -2,6 +2,8 @@
 
 pub mod json;
 
+pub use json::JsonCache;
+
 use crate::graph::Graph;
 
 /// Trait for graph cache implementations (persist and load a [`Graph`]).
