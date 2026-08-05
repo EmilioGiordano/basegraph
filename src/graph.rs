@@ -1,0 +1,89 @@
+//! Graph structure and basic operations.
+
+use crate::model::{Edge, Node, NodeId};
+
+/// A directed graph of code elements (nodes) and their relationships (edges).
+#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Graph {
+    nodes: Vec<Node>,
+    edges: Vec<Edge>,
+}
+
+impl Graph {
+    /// Creates a new, empty graph.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a node to the graph.
+    pub fn add_node(&mut self, node: Node) {
+        self.nodes.push(node);
+    }
+
+    /// Adds an edge to the graph.
+    pub fn add_edge(&mut self, edge: Edge) {
+        self.edges.push(edge);
+    }
+
+    /// Returns a slice of all nodes.
+    pub fn nodes(&self) -> &[Node] {
+        &self.nodes
+    }
+
+    /// Returns a slice of all edges.
+    pub fn edges(&self) -> &[Edge] {
+        &self.edges
+    }
+
+    /// Looks up a node by its id.
+    pub fn node_by_id(&self, id: NodeId) -> Option<&Node> {
+        self.nodes.iter().find(|n| n.id == id)
+    }
+
+    /// Returns the ids of all nodes directly reachable from the given node.
+    pub fn neighbors(&self, id: NodeId) -> Vec<NodeId> {
+        self.edges
+            .iter()
+            .filter(|e| e.src == id)
+            .map(|e| e.dst)
+            .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::{Confidence, EdgeKind, NodeKind};
+
+    fn sample_node(id: u32, name: &str) -> Node {
+        Node {
+            id: NodeId(id),
+            kind: NodeKind::Function,
+            name: name.into(),
+            fqn: name.into(),
+            signature: String::new(),
+            file: "src/lib.rs".into(),
+            line_start: 1,
+            line_end: 1,
+            doc: None,
+        }
+    }
+
+    #[test]
+    fn test_graph_operations() {
+        let mut graph = Graph::new();
+        graph.add_node(sample_node(1, "foo"));
+        graph.add_node(sample_node(2, "bar"));
+        graph.add_edge(Edge {
+            src: NodeId(1),
+            dst: NodeId(2),
+            kind: EdgeKind::Calls,
+            confidence: Confidence::Deterministic,
+        });
+
+        assert_eq!(graph.nodes().len(), 2);
+        assert_eq!(graph.edges().len(), 1);
+        assert_eq!(graph.node_by_id(NodeId(1)).expect("node 1").name, "foo");
+        assert_eq!(graph.neighbors(NodeId(1)), vec![NodeId(2)]);
+    }
+}
