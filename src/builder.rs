@@ -1,0 +1,92 @@
+//! Graph builder: parses every Rust file under a directory into a [`Graph`].
+
+use std::path::{Path, PathBuf};
+
+use crate::graph::Graph;
+use crate::model::NodeId;
+use crate::parser::rust::RustParser;
+use crate::parser::LanguageParser;
+
+/// Errors that can occur while building the graph from a directory.
+#[derive(Debug, thiserror::Error)]
+pub enum BuildError {
+    /// An I/O error while walking the directory tree.
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+/// Recursively collects the paths of all `.rs` files under `root`, skipping
+/// directories named `target` and hidden directories (those starting with `.`).
+fn collect_rust_files(root: &Path, out: &mut Vec<PathBuf>) -> std::io::Result<()> {
+    if root.is_file() {
+        if root.extension().and_then(|e| e.to_str()) == Some("rs") {
+            out.push(root.to_path_buf());
+        }
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if path.is_dir() {
+            if name == "target" || name.starts_with('.') {
+                continue;
+            }
+            collect_rust_files(&path, out)?;
+        } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// Parses every Rust file under `root` and builds a [`Graph`] of the discovered
+/// symbols. Files that cannot be read or parsed are skipped. Node ids are
+/// reassigned to be globally sequential in a deterministic (sorted) file order.
+pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
+    let mut files = Vec::new();
+    collect_rust_files(root, &mut files)?;
+    files.sort();
+
+    let parser = RustParser;
+    let mut graph = Graph::new();
+    let mut counter: u32 = 0;
+
+    for file in files {
+        let content = match std::fs::read_to_string(&file) {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        let file_str = file.to_string_lossy();
+        let nodes = match parser.parse_source(&content, &file_str) {
+            Ok(n) => n,
+            Err(_) => continue,
+        };
+        for mut node in nodes {
+            node.id = NodeId(counter);
+            counter += 1;
+            graph.add_node(node);
+        }
+    }
+
+    Ok(graph)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_graph() {
+        let dir = std::env::temp_dir().join("codegraph_builder_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create dir");
+        std::fs::write(dir.join("sample.rs"), "struct A {}\nfn b() {}\n").expect("write file");
+
+        let graph = build_graph(&dir).expect("build failed");
+        assert_eq!(graph.nodes().len(), 2);
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+}
