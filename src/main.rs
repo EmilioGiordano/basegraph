@@ -1,6 +1,6 @@
 //! CodeGraph command-line interface.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
@@ -10,9 +10,15 @@ use codegraph::cache::{Cache, JsonCache};
 use codegraph::query::{self, QueryResult};
 use codegraph::tokens::HeuristicCounter;
 
-/// Token-efficient code graph for LLM agents.
+const CACHE_FILE: &str = "codegraph.json";
+const DEFAULT_BUDGET: usize = 4000;
+
 #[derive(Parser)]
-#[command(name = "codegraph", version, about)]
+#[command(
+    name = "codegraph",
+    version,
+    about = "Token-efficient code graph for LLM agents"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -20,87 +26,84 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Parse a codebase directory and write the graph cache.
+    /// Parse a codebase directory and write the graph cache inside it.
     Build {
-        /// Root directory of the codebase to analyze.
-        path: PathBuf,
-        /// Path to the cache file to write.
-        #[arg(long, default_value = ".codegraph/graph.json")]
-        cache: PathBuf,
+        dir: PathBuf,
+        #[arg(long)]
+        cache: Option<PathBuf>,
     },
     /// Print a compressed, project-wide map of symbols.
     Map {
-        /// Maximum number of tokens in the output.
-        #[arg(long, default_value_t = 4000)]
+        dir: PathBuf,
+        #[arg(long, default_value_t = DEFAULT_BUDGET)]
         budget: usize,
-        /// Path to the cache file to read.
-        #[arg(long, default_value = ".codegraph/graph.json")]
-        cache: PathBuf,
-        /// Output format.
+        #[arg(long)]
+        cache: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = Format::Json)]
         format: Format,
     },
     /// Print the relevant context bundle for a symbol.
     Context {
-        /// Symbol name or fully-qualified name to look up.
+        dir: PathBuf,
         symbol: String,
-        /// Maximum number of tokens in the output.
-        #[arg(long, default_value_t = 4000)]
+        #[arg(long, default_value_t = DEFAULT_BUDGET)]
         budget: usize,
-        /// Path to the cache file to read.
-        #[arg(long, default_value = ".codegraph/graph.json")]
-        cache: PathBuf,
-        /// Output format.
+        #[arg(long)]
+        cache: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = Format::Json)]
         format: Format,
     },
 }
 
-/// Output format for query results.
 #[derive(Clone, Copy, ValueEnum)]
 enum Format {
-    /// Machine-consumable JSON.
     Json,
-    /// Human-readable text.
     Text,
+}
+
+fn cache_path(dir: &Path, cache: Option<PathBuf>) -> PathBuf {
+    cache.unwrap_or_else(|| dir.join(CACHE_FILE))
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Build { path, cache } => {
-            let graph = build_graph(&path).context("building graph")?;
-            if let Some(parent) = cache.parent() {
+        Command::Build { dir, cache } => {
+            let path = cache_path(&dir, cache);
+            let graph = build_graph(&dir).context("building graph")?;
+            if let Some(parent) = path.parent() {
                 if !parent.as_os_str().is_empty() {
                     std::fs::create_dir_all(parent).context("creating cache directory")?;
                 }
             }
-            JsonCache::new(&cache)
-                .save(&graph)
-                .context("saving cache")?;
+            JsonCache::new(&path).save(&graph).context("saving cache")?;
             println!(
                 "Built graph: {} nodes, {} edges -> {}",
                 graph.nodes().len(),
                 graph.edges().len(),
-                cache.display()
+                path.display()
             );
         }
         Command::Map {
+            dir,
             budget,
             cache,
             format,
         } => {
-            let graph = JsonCache::new(&cache).load().context("loading cache")?;
+            let path = cache_path(&dir, cache);
+            let graph = JsonCache::new(&path).load().context("loading cache")?;
             let result = query::map(&graph, budget, &HeuristicCounter);
             print_result(&result, format)?;
         }
         Command::Context {
+            dir,
             symbol,
             budget,
             cache,
             format,
         } => {
-            let graph = JsonCache::new(&cache).load().context("loading cache")?;
+            let path = cache_path(&dir, cache);
+            let graph = JsonCache::new(&path).load().context("loading cache")?;
             let result = query::context(&graph, &symbol, budget, &HeuristicCounter);
             print_result(&result, format)?;
         }
@@ -108,7 +111,6 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Print a [`QueryResult`] in the requested format.
 fn print_result(result: &QueryResult, format: Format) -> Result<()> {
     match format {
         Format::Json => {
