@@ -65,31 +65,37 @@ impl super::LanguageParser for RustParser {
                 }
                 Item::Struct(item_struct) => {
                     let name = item_struct.ident.to_string();
+                    let doc = Self::extract_docs(&item_struct.attrs);
+                    let mut decl = item_struct.clone();
+                    decl.attrs.clear();
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Struct,
-                        signature: format!("struct {name}"),
+                        signature: format!("{}", quote! { #decl }),
                         fqn: name.clone(),
                         name,
                         file: file.to_string(),
                         line_start: item_struct.span().start().line,
                         line_end: item_struct.span().end().line,
-                        doc: Self::extract_docs(&item_struct.attrs),
+                        doc,
                     });
                     id_counter += 1;
                 }
                 Item::Enum(item_enum) => {
                     let name = item_enum.ident.to_string();
+                    let doc = Self::extract_docs(&item_enum.attrs);
+                    let mut decl = item_enum.clone();
+                    decl.attrs.clear();
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Enum,
-                        signature: format!("enum {name}"),
+                        signature: format!("{}", quote! { #decl }),
                         fqn: name.clone(),
                         name,
                         file: file.to_string(),
                         line_start: item_enum.span().start().line,
                         line_end: item_enum.span().end().line,
-                        doc: Self::extract_docs(&item_enum.attrs),
+                        doc,
                     });
                     id_counter += 1;
                 }
@@ -275,12 +281,14 @@ mod tests {
             .find(|n| n.kind == NodeKind::Struct)
             .expect("struct node");
         assert_eq!(st.name, "MyStruct");
+        assert!(st.signature.contains("field"));
 
         let en = nodes
             .iter()
             .find(|n| n.kind == NodeKind::Enum)
             .expect("enum node");
         assert_eq!(en.name, "MyEnum");
+        assert!(en.signature.contains('A'));
 
         let tr = nodes
             .iter()

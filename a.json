@@ -1,0 +1,26 @@
+{
+  "fromScenario": "{{var.scenario.executionUrl}}",
+  "error_message":"{{error_message}}",
+  "commentary_description": "{{commentary_description}}",
+  "carrier": "{{carriers.name}}",
+  "encargado_workflow": "{{trello_username}}"
+}
+
+
+{
+  "fromScenario": "{{var.scenario.executionUrl}}",
+  "source": "Make",
+  "error_message":"Falló la automatización de stock de Sanitino",
+  "commentary_description": "No se pudo obtener el enlace de descarga del archivo de stock, por lo que no se procesó el stock de hoy ({{timestamp}}).",
+  "carrier": "SANITINOTHEM",
+  "encargado_workflow": "@egiordanoreformam"
+}
+
+{
+  "fromScenario": "{{var.scenario.executionUrl}}",
+  "source": "Make",
+  "error_message":"Falló la automatización de stock de Sanitino",
+  "commentary_description": "La automatización de stock de Sanitino para Nexus falló. No se pudo enviar el request al escenario de URL dinámica de Nexus, por lo que no se procesó el stock de hoy ({{timestamp}})",
+  "carrier": "SANITINOTHEM",
+  "encargado_workflow": "@egiordanoreformam"
+}
