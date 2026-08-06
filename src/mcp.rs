@@ -399,6 +399,20 @@ mod tests {
     }
 
     #[test]
+    fn test_tools_call_show() {
+        let mut s = sample_state();
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 6, "method": "tools/call",
+                "params": { "name": "show", "arguments": { "symbol": "foo" } }
+            }))
+            .expect("response");
+        assert_eq!(resp["result"]["isError"], false);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("foo"));
+    }
+
+    #[test]
     fn test_missing_arg_is_tool_error() {
         let mut s = sample_state();
         let resp = s
