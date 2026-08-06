@@ -119,10 +119,7 @@ fn print_result(result: &QueryResult, format: Format) -> Result<()> {
         }
         Format::Text => {
             for item in &result.items {
-                println!(
-                    "[{:?}] {} :: {}  ({}:{})",
-                    item.kind, item.fqn, item.signature, item.file, item.line_start
-                );
+                println!("{}", item.render());
             }
             if result.truncated {
                 println!("... (truncated to fit token budget)");

@@ -48,6 +48,15 @@ impl Graph {
             .map(|e| e.dst)
             .collect()
     }
+
+    /// Reverse of `neighbors`: ids of all nodes that reach the given node.
+    pub fn callers(&self, id: NodeId) -> Vec<NodeId> {
+        self.edges
+            .iter()
+            .filter(|e| e.dst == id)
+            .map(|e| e.src)
+            .collect()
+    }
 }
 
 #[cfg(test)]
