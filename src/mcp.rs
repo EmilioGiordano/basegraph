@@ -37,20 +37,28 @@ pub fn serve(dir: PathBuf) -> Result<()> {
     let mut out = stdout.lock();
 
     for line in stdin.lock().lines() {
-        let line = line.context("reading stdin")?;
+        let line = match line {
+            Ok(line) => line,
+            Err(e) => {
+                eprintln!("codegraph mcp: stdin read error: {e}");
+                continue;
+            }
+        };
         let trimmed = line.trim_start_matches('\u{feff}').trim();
         if trimmed.is_empty() {
             continue;
         }
-        match serde_json::from_str::<Value>(trimmed) {
-            Ok(msg) => {
-                if let Some(response) = state.handle(&msg) {
-                    write_message(&mut out, &response)?;
-                }
-            }
-            Err(e) => {
-                let err = error_response(Value::Null, -32700, &format!("parse error: {e}"));
-                write_message(&mut out, &err)?;
+        let response = match serde_json::from_str::<Value>(trimmed) {
+            Ok(msg) => state.handle(&msg),
+            Err(e) => Some(error_response(
+                Value::Null,
+                -32700,
+                &format!("parse error: {e}"),
+            )),
+        };
+        if let Some(response) = response {
+            if let Err(e) = write_message(&mut out, &response) {
+                eprintln!("codegraph mcp: write error: {e}");
             }
         }
     }
@@ -84,13 +92,24 @@ impl ServerState {
     }
 
     /// Reload the graph if the cache file changed since we last read it (e.g. the
-    /// agent rebuilt it while the server was running).
+    /// agent rebuilt it while the server was running). A failed read (such as a
+    /// half-written file) keeps the previous graph and is retried on the next call.
     fn reload_if_changed(&mut self) {
         let current = file_mtime(&self.cache_path);
-        if current != self.mtime {
-            if let Ok(g) = JsonCache::new(&self.cache_path).load() {
-                self.graph = g;
+        if current == self.mtime {
+            return;
+        }
+        match JsonCache::new(&self.cache_path).load() {
+            Ok(graph) => {
+                self.graph = graph;
                 self.mtime = current;
+                eprintln!(
+                    "codegraph mcp: reloaded graph ({} nodes)",
+                    self.graph.nodes().len()
+                );
+            }
+            Err(e) => {
+                eprintln!("codegraph mcp: reload skipped, serving previous graph ({e})");
             }
         }
     }
@@ -186,36 +205,54 @@ impl ServerState {
             .cloned()
             .unwrap_or_else(|| json!({}));
 
-        let text = match name {
+        // Run the query inside catch_unwind so a bug on an untested graph becomes a
+        // recoverable tool error rather than killing this long-lived server.
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.run_tool(name, &args)));
+        match outcome {
+            Ok(Ok(text)) => content_result(id, &text, false),
+            Ok(Err(ToolError::Unknown(tool))) => {
+                error_response(id, -32602, &format!("unknown tool: {tool}"))
+            }
+            Ok(Err(ToolError::BadArg(message))) => content_result(id, &message, true),
+            Err(_) => content_result(id, "internal error: the query panicked", true),
+        }
+    }
+
+    fn run_tool(&self, name: &str, args: &Value) -> Result<String, ToolError> {
+        match name {
             "map" => {
-                let budget = arg_usize(&args, "budget", DEFAULT_BUDGET);
-                query::map(&self.graph, budget, &self.counter).to_text()
+                let budget = arg_usize(args, "budget", DEFAULT_BUDGET);
+                Ok(query::map(&self.graph, budget, &self.counter).to_text())
             }
             "context" => {
-                let Some(symbol) = args.get("symbol").and_then(Value::as_str) else {
-                    return tool_error(id, "missing required argument: symbol");
-                };
-                let budget = arg_usize(&args, "budget", DEFAULT_BUDGET);
-                query::context(&self.graph, symbol, budget, &self.counter).to_text()
+                let symbol = args
+                    .get("symbol")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::BadArg("missing required argument: symbol".into()))?;
+                let budget = arg_usize(args, "budget", DEFAULT_BUDGET);
+                Ok(query::context(&self.graph, symbol, budget, &self.counter).to_text())
             }
             "search" => {
-                let Some(query) = args.get("query").and_then(Value::as_str) else {
-                    return tool_error(id, "missing required argument: query");
-                };
-                let limit = arg_usize(&args, "limit", DEFAULT_SEARCH_LIMIT);
-                query::render_items(&query::search(&self.graph, query, limit))
+                let query = args
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::BadArg("missing required argument: query".into()))?;
+                let limit = arg_usize(args, "limit", DEFAULT_SEARCH_LIMIT);
+                Ok(query::render_items(&query::search(
+                    &self.graph,
+                    query,
+                    limit,
+                )))
             }
-            other => return error_response(id, -32602, &format!("unknown tool: {other}")),
-        };
-
-        success(
-            id,
-            json!({
-                "content": [ { "type": "text", "text": text } ],
-                "isError": false
-            }),
-        )
+            other => Err(ToolError::Unknown(other.to_string())),
+        }
     }
+}
+
+enum ToolError {
+    Unknown(String),
+    BadArg(String),
 }
 
 fn success(id: Value, result: Value) -> Value {
@@ -226,10 +263,10 @@ fn error_response(id: Value, code: i64, message: &str) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
 }
 
-fn tool_error(id: Value, message: &str) -> Value {
+fn content_result(id: Value, text: &str, is_error: bool) -> Value {
     success(
         id,
-        json!({ "content": [ { "type": "text", "text": message } ], "isError": true }),
+        json!({ "content": [ { "type": "text", "text": text } ], "isError": is_error }),
     )
 }
 
@@ -314,6 +351,18 @@ mod tests {
         assert_eq!(resp["result"]["isError"], false);
         let text = resp["result"]["content"][0]["text"].as_str().expect("text");
         assert!(text.contains("foo"));
+    }
+
+    #[test]
+    fn test_missing_arg_is_tool_error() {
+        let mut s = sample_state();
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 5, "method": "tools/call",
+                "params": { "name": "context", "arguments": {} }
+            }))
+            .expect("response");
+        assert_eq!(resp["result"]["isError"], true);
     }
 
     #[test]
