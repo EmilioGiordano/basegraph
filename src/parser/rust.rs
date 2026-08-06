@@ -68,6 +68,9 @@ impl super::LanguageParser for RustParser {
                     let doc = Self::extract_docs(&item_struct.attrs);
                     let mut decl = item_struct.clone();
                     decl.attrs.clear();
+                    for field in decl.fields.iter_mut() {
+                        field.attrs.clear();
+                    }
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Struct,
@@ -86,6 +89,12 @@ impl super::LanguageParser for RustParser {
                     let doc = Self::extract_docs(&item_enum.attrs);
                     let mut decl = item_enum.clone();
                     decl.attrs.clear();
+                    for variant in decl.variants.iter_mut() {
+                        variant.attrs.clear();
+                        for field in variant.fields.iter_mut() {
+                            field.attrs.clear();
+                        }
+                    }
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Enum,
@@ -105,8 +114,14 @@ impl super::LanguageParser for RustParser {
                     let mut decl = item_trait.clone();
                     decl.attrs.clear();
                     for trait_item in &mut decl.items {
-                        if let syn::TraitItem::Fn(f) = trait_item {
-                            f.default = None;
+                        match trait_item {
+                            syn::TraitItem::Fn(f) => {
+                                f.attrs.clear();
+                                f.default = None;
+                            }
+                            syn::TraitItem::Const(c) => c.attrs.clear(),
+                            syn::TraitItem::Type(t) => t.attrs.clear(),
+                            _ => {}
                         }
                     }
                     nodes.push(Node {
