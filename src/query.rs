@@ -5,7 +5,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 
 use crate::graph::Graph;
-use crate::model::{Node, NodeId, NodeKind};
+use crate::model::{EdgeKind, Node, NodeId, NodeKind};
 use crate::rank;
 use crate::tokens::TokenCounter;
 
@@ -20,6 +20,8 @@ pub enum Relation {
     Target,
     Caller,
     Callee,
+    Implements,
+    Implementor,
     Colocated,
 }
 
@@ -27,7 +29,7 @@ impl Relation {
     fn priority(self) -> u8 {
         match self {
             Relation::Target => 3,
-            Relation::Caller | Relation::Callee => 2,
+            Relation::Caller | Relation::Callee | Relation::Implements | Relation::Implementor => 2,
             Relation::Colocated => 1,
         }
     }
@@ -37,6 +39,8 @@ impl Relation {
             Relation::Target => "target",
             Relation::Caller => "caller",
             Relation::Callee => "callee",
+            Relation::Implements => "implements",
+            Relation::Implementor => "implementor",
             Relation::Colocated => "co-located",
         }
     }
@@ -184,11 +188,17 @@ pub fn context(
         add_relation(&mut relations, m.id, Relation::Target);
     }
     for m in &matches {
-        for callee in graph.neighbors(m.id) {
+        for callee in graph.out_edges(m.id, EdgeKind::Calls) {
             add_relation(&mut relations, callee, Relation::Callee);
         }
-        for caller in graph.callers(m.id) {
+        for caller in graph.in_edges(m.id, EdgeKind::Calls) {
             add_relation(&mut relations, caller, Relation::Caller);
+        }
+        for implemented in graph.out_edges(m.id, EdgeKind::Implements) {
+            add_relation(&mut relations, implemented, Relation::Implements);
+        }
+        for implementor in graph.in_edges(m.id, EdgeKind::Implements) {
+            add_relation(&mut relations, implementor, Relation::Implementor);
         }
     }
     let match_files: Vec<String> = matches.iter().map(|m| m.file.clone()).collect();
@@ -307,5 +317,35 @@ mod tests {
             .find(|i| i.fqn == "alpha")
             .expect("alpha present in gamma context");
         assert_eq!(alpha.relation, Some(Relation::Caller));
+    }
+
+    #[test]
+    fn test_context_implements_labels() {
+        let mut g = Graph::new();
+        g.add_node(node(0, "MyType", "a.rs", 1));
+        g.add_node(node(1, "MyTrait", "a.rs", 10));
+        g.add_edge(Edge {
+            src: NodeId(0),
+            dst: NodeId(1),
+            kind: EdgeKind::Implements,
+            confidence: Confidence::Deterministic,
+        });
+        let counter = HeuristicCounter;
+
+        let res = context(&g, "MyTrait", 100_000, &counter);
+        let ty = res
+            .items
+            .iter()
+            .find(|i| i.fqn == "MyType")
+            .expect("type present");
+        assert_eq!(ty.relation, Some(Relation::Implementor));
+
+        let res2 = context(&g, "MyType", 100_000, &counter);
+        let tr = res2
+            .items
+            .iter()
+            .find(|i| i.fqn == "MyTrait")
+            .expect("trait present");
+        assert_eq!(tr.relation, Some(Relation::Implements));
     }
 }

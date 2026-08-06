@@ -192,6 +192,36 @@ impl RustParser {
         visitor.visit_file(&ast);
         visitor.calls
     }
+
+    /// Extract `(type_name, trait_name)` pairs from `impl Trait for Type` blocks.
+    pub fn parse_impls(source: &str) -> Vec<(String, String)> {
+        let ast = match syn::parse_file(source) {
+            Ok(f) => f,
+            Err(_) => return Vec::new(),
+        };
+        let mut out = Vec::new();
+        for item in ast.items {
+            if let Item::Impl(item_impl) = item {
+                if let Some((_, trait_path, _)) = &item_impl.trait_ {
+                    let Some(trait_seg) = trait_path.segments.last() else {
+                        continue;
+                    };
+                    if let Some(type_name) = type_ident(&item_impl.self_ty) {
+                        out.push((type_name, trait_seg.ident.to_string()));
+                    }
+                }
+            }
+        }
+        out
+    }
+}
+
+/// The final path segment ident of a named type, if it is one.
+fn type_ident(ty: &syn::Type) -> Option<String> {
+    match ty {
+        syn::Type::Path(tp) => tp.path.segments.last().map(|s| s.ident.to_string()),
+        _ => None,
+    }
 }
 
 #[derive(Default)]

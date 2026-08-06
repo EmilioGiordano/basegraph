@@ -111,6 +111,21 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
                 }
             }
         }
+        for (type_name, trait_name) in RustParser::parse_impls(&content) {
+            if let (Some(src), Some(dst)) = (
+                resolve(&type_name, &file_str),
+                resolve(&trait_name, &file_str),
+            ) {
+                if src != dst {
+                    graph.add_edge(Edge {
+                        src,
+                        dst,
+                        kind: EdgeKind::Implements,
+                        confidence: Confidence::Heuristic,
+                    });
+                }
+            }
+        }
     }
 
     Ok(graph)
@@ -150,6 +165,26 @@ mod tests {
         let graph = build_graph(&dir).expect("build failed");
         // Only `go -> unique` survives; the ambiguous `shared()` call is dropped.
         assert_eq!(graph.edges().len(), 1);
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn test_implements_edges() {
+        let dir = std::env::temp_dir().join("codegraph_impl_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create dir");
+        std::fs::write(
+            dir.join("m.rs"),
+            "trait Greet { fn hi(&self); }\nstruct Robot;\nimpl Greet for Robot { fn hi(&self) {} }\n",
+        )
+        .expect("w");
+
+        let graph = build_graph(&dir).expect("build failed");
+        assert!(
+            graph.edges().iter().any(|e| e.kind == EdgeKind::Implements),
+            "expected an Implements edge"
+        );
 
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }

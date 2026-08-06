@@ -1,6 +1,6 @@
 //! Graph structure and basic operations.
 
-use crate::model::{Edge, Node, NodeId};
+use crate::model::{Edge, EdgeKind, Node, NodeId};
 
 /// A directed graph of code elements (nodes) and their relationships (edges).
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
@@ -54,6 +54,24 @@ impl Graph {
         self.edges
             .iter()
             .filter(|e| e.dst == id)
+            .map(|e| e.src)
+            .collect()
+    }
+
+    /// Ids reachable from `id` via an edge of the given kind.
+    pub fn out_edges(&self, id: NodeId, kind: EdgeKind) -> Vec<NodeId> {
+        self.edges
+            .iter()
+            .filter(|e| e.src == id && e.kind == kind)
+            .map(|e| e.dst)
+            .collect()
+    }
+
+    /// Ids that reach `id` via an edge of the given kind.
+    pub fn in_edges(&self, id: NodeId, kind: EdgeKind) -> Vec<NodeId> {
+        self.edges
+            .iter()
+            .filter(|e| e.dst == id && e.kind == kind)
             .map(|e| e.src)
             .collect()
     }
