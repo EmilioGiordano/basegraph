@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use crate::graph::Graph;
 use crate::model::{Confidence, Edge, EdgeKind, NodeId};
-use crate::parser::rust::RustParser;
+use crate::parser::rust::{Receiver, RustParser};
 use crate::parser::LanguageParser;
 
 /// Errors that can occur while building the graph from a directory.
@@ -108,6 +108,18 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
             _ => None,
         }
     };
+    // Field types, so `self.field.method()` can resolve by the field's type.
+    let mut field_index: HashMap<(String, String), Vec<String>> = HashMap::new();
+    for file in &files {
+        if let Ok(content) = std::fs::read_to_string(file) {
+            for (struct_name, field, ty) in RustParser::parse_fields(&content) {
+                field_index
+                    .entry((struct_name, field))
+                    .or_default()
+                    .push(ty);
+            }
+        }
+    }
     for file in &files {
         let Ok(content) = std::fs::read_to_string(file) else {
             continue;
@@ -115,9 +127,16 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
         let file_str = file.to_string_lossy();
         for (caller, callee, recv_type) in RustParser::parse_calls(&content) {
             let dst = match &recv_type {
-                Some(ty) => {
+                Some(Receiver::Type(ty)) => {
                     resolve_method(ty, &callee, &file_str).or_else(|| resolve(&callee, &file_str))
                 }
+                Some(Receiver::SelfField(self_ty, field)) => field_index
+                    .get(&(self_ty.clone(), field.clone()))
+                    .and_then(|types| {
+                        types
+                            .iter()
+                            .find_map(|ty| resolve_method(ty, &callee, &file_str))
+                    }),
                 None => resolve(&callee, &file_str),
             };
             if let (Some(src), Some(dst)) = (resolve(&caller, &file_str), dst) {
@@ -289,6 +308,33 @@ mod tests {
                 .iter()
                 .any(|e| e.kind == EdgeKind::Calls && e.src == go && e.dst == helper),
             "self.helper() should resolve to A::helper"
+        );
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn test_self_field_method_resolves() {
+        let dir = std::env::temp_dir().join("codegraph_fieldmethod_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create dir");
+        std::fs::write(
+            dir.join("s.rs"),
+            "struct Inner;\nimpl Inner { fn go(&self) {} }\nstruct Outer { inner: Inner }\nimpl Outer { fn run(&self) { self.inner.go(); } }\n",
+        )
+        .expect("w");
+
+        let graph = build_graph(&dir).expect("build failed");
+        let id = |fqn: &str| graph.nodes().iter().find(|n| n.fqn == fqn).map(|n| n.id);
+        let run = id("Outer::run").expect("Outer::run");
+        let go = id("Inner::go").expect("Inner::go");
+        // `self.inner.go()` resolves to Inner::go via the field's declared type.
+        assert!(
+            graph
+                .edges()
+                .iter()
+                .any(|e| e.kind == EdgeKind::Calls && e.src == run && e.dst == go),
+            "self.inner.go() should resolve to Inner::go"
         );
 
         std::fs::remove_dir_all(&dir).expect("cleanup");

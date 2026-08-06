@@ -198,10 +198,10 @@ impl super::LanguageParser for RustParser {
 }
 
 impl RustParser {
-    /// Extract `(caller, callee, receiver_type)` triples. `receiver_type` is the
-    /// type qualifying the call (`self`'s type for `self.m()`, or `T` for `T::m()`)
-    /// when known, letting the builder resolve method calls precisely by type.
-    pub fn parse_calls(source: &str) -> Vec<(String, String, Option<String>)> {
+    /// Extract `(caller, callee, receiver)` triples. `receiver` records what the
+    /// call resolves against when statically known (`self`'s type, `T::m`, or
+    /// `self.field`), letting the builder resolve method calls precisely.
+    pub fn parse_calls(source: &str) -> Vec<(String, String, Option<Receiver>)> {
         let ast = match syn::parse_file(source) {
             Ok(f) => f,
             Err(_) => return Vec::new(),
@@ -221,6 +221,30 @@ impl RustParser {
         let mut visitor = CallVisitor::default();
         visitor.visit_file(&ast);
         visitor.type_uses
+    }
+
+    /// Extract `(struct, field, field_type)` rows for named struct fields, so the
+    /// builder can resolve `self.field.method()` by the field's type.
+    pub fn parse_fields(source: &str) -> Vec<(String, String, String)> {
+        let ast = match syn::parse_file(source) {
+            Ok(f) => f,
+            Err(_) => return Vec::new(),
+        };
+        let mut out = Vec::new();
+        for item in &ast.items {
+            if let Item::Struct(s) = item {
+                let struct_name = s.ident.to_string();
+                for field in &s.fields {
+                    if let Some(fname) = &field.ident {
+                        let fname = fname.to_string();
+                        collect_type_idents(&field.ty, &mut |t| {
+                            out.push((struct_name.clone(), fname.clone(), t))
+                        });
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Extract `(type_name, trait_name)` pairs from `impl Trait for Type` blocks.
@@ -335,15 +359,42 @@ fn collect_type_idents(ty: &syn::Type, f: &mut impl FnMut(String)) {
         }
         syn::Type::Paren(p) => collect_type_idents(&p.elem, f),
         syn::Type::Group(g) => collect_type_idents(&g.elem, f),
+        syn::Type::TraitObject(t) => {
+            for bound in &t.bounds {
+                if let syn::TypeParamBound::Trait(tr) = bound {
+                    if let Some(seg) = tr.path.segments.last() {
+                        f(seg.ident.to_string());
+                    }
+                }
+            }
+        }
+        syn::Type::ImplTrait(t) => {
+            for bound in &t.bounds {
+                if let syn::TypeParamBound::Trait(tr) = bound {
+                    if let Some(seg) = tr.path.segments.last() {
+                        f(seg.ident.to_string());
+                    }
+                }
+            }
+        }
         _ => {}
     }
+}
+
+/// The receiver a call resolves against, when statically known.
+#[derive(Debug, Clone)]
+pub enum Receiver {
+    /// A concrete type: `self.m()` (Self type) or `T::m()`.
+    Type(String),
+    /// A field of self, `self.field.m()`: (Self type, field name).
+    SelfField(String, String),
 }
 
 #[derive(Default)]
 struct CallVisitor {
     scope: Vec<String>,
     self_ty: Vec<String>,
-    calls: Vec<(String, String, Option<String>)>,
+    calls: Vec<(String, String, Option<Receiver>)>,
     type_uses: Vec<(String, String)>,
 }
 
@@ -377,7 +428,9 @@ impl<'ast> Visit<'ast> for CallVisitor {
             if let Some(method) = segs.last() {
                 // `T::method()` resolves via the qualifying type; bare `f()` by name.
                 let recv = if segs.len() >= 2 {
-                    segs.iter().nth(segs.len() - 2).map(|s| s.ident.to_string())
+                    segs.iter()
+                        .nth(segs.len() - 2)
+                        .map(|s| Receiver::Type(s.ident.to_string()))
                 } else {
                     None
                 };
@@ -389,9 +442,19 @@ impl<'ast> Visit<'ast> for CallVisitor {
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
         if let Some(caller) = self.scope.last().cloned() {
-            // `self.method()` resolves against the enclosing impl's Self type.
+            // Resolve against `self`'s type, or the type of `self.field`.
             let recv = match &*node.receiver {
-                Expr::Path(p) if p.path.is_ident("self") => self.self_ty.last().cloned(),
+                Expr::Path(p) if p.path.is_ident("self") => {
+                    self.self_ty.last().cloned().map(Receiver::Type)
+                }
+                Expr::Field(field) => match (&*field.base, &field.member) {
+                    (Expr::Path(p), syn::Member::Named(name)) if p.path.is_ident("self") => self
+                        .self_ty
+                        .last()
+                        .cloned()
+                        .map(|ty| Receiver::SelfField(ty, name.to_string())),
+                    _ => None,
+                },
                 _ => None,
             };
             self.calls.push((caller, node.method.to_string(), recv));
