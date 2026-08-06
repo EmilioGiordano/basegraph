@@ -145,6 +145,9 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
         }
     }
 
+    let ranks = crate::rank::pagerank(&graph);
+    graph.set_ranks(&ranks);
+
     Ok(graph)
 }
 

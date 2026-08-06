@@ -1,5 +1,7 @@
 //! Graph structure and basic operations.
 
+use std::collections::HashMap;
+
 use crate::model::{Edge, EdgeKind, Node, NodeId};
 
 /// A directed graph of code elements (nodes) and their relationships (edges).
@@ -7,6 +9,8 @@ use crate::model::{Edge, EdgeKind, Node, NodeId};
 pub struct Graph {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
+    #[serde(default)]
+    ranks: Vec<f64>,
 }
 
 impl Graph {
@@ -74,6 +78,29 @@ impl Graph {
             .filter(|e| e.dst == id && e.kind == kind)
             .map(|e| e.src)
             .collect()
+    }
+
+    /// Store precomputed PageRank scores (indexed by node id) so queries look up
+    /// centrality in O(1) instead of recomputing the whole ranking each call.
+    pub fn set_ranks(&mut self, ranks: &HashMap<NodeId, f64>) {
+        let len = self
+            .nodes
+            .iter()
+            .map(|n| n.id.0 as usize + 1)
+            .max()
+            .unwrap_or(0);
+        let mut scores = vec![0.0; len];
+        for (id, rank) in ranks {
+            if let Some(slot) = scores.get_mut(id.0 as usize) {
+                *slot = *rank;
+            }
+        }
+        self.ranks = scores;
+    }
+
+    /// PageRank score for a node id, or 0.0 if the graph was never ranked.
+    pub fn rank_of(&self, id: NodeId) -> f64 {
+        self.ranks.get(id.0 as usize).copied().unwrap_or(0.0)
     }
 }
 

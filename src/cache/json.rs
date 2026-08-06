@@ -18,7 +18,7 @@ impl JsonCache {
 }
 
 /// Current on-disk cache format version. Bump when the graph schema changes.
-const CURRENT_VERSION: u32 = 1;
+const CURRENT_VERSION: u32 = 2;
 
 #[derive(serde::Serialize)]
 struct CacheEnvelopeRef<'a> {
