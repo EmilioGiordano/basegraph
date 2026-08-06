@@ -73,11 +73,18 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
     }
 
     let mut by_name: HashMap<String, Vec<(NodeId, String)>> = HashMap::new();
+    let mut by_type_method: HashMap<(String, String), Vec<(NodeId, String)>> = HashMap::new();
     for node in graph.nodes() {
         by_name
             .entry(node.name.clone())
             .or_default()
             .push((node.id, node.file.clone()));
+        if let Some(owner) = simple_owner(&node.fqn) {
+            by_type_method
+                .entry((owner, node.name.clone()))
+                .or_default()
+                .push((node.id, node.file.clone()));
+        }
     }
     // Prefer a definition in the calling file; otherwise accept the name only if
     // it is globally unique. Ambiguous names (`map`, `new`, ...) yield no edge
@@ -91,15 +98,29 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
             _ => None,
         }
     };
+    // Resolve a method precisely by its receiver type (`Type::m()` / `self.m()`).
+    let resolve_method = |ty: &str, method: &str, file: &str| -> Option<NodeId> {
+        let candidates = by_type_method.get(&(ty.to_string(), method.to_string()))?;
+        let mut same_file = candidates.iter().filter(|(_, f)| f.as_str() == file);
+        match (same_file.next(), same_file.next()) {
+            (Some((id, _)), None) => Some(*id),
+            (None, _) if candidates.len() == 1 => Some(candidates[0].0),
+            _ => None,
+        }
+    };
     for file in &files {
         let Ok(content) = std::fs::read_to_string(file) else {
             continue;
         };
         let file_str = file.to_string_lossy();
-        for (caller, callee) in RustParser::parse_calls(&content) {
-            if let (Some(src), Some(dst)) =
-                (resolve(&caller, &file_str), resolve(&callee, &file_str))
-            {
+        for (caller, callee, recv_type) in RustParser::parse_calls(&content) {
+            let dst = match &recv_type {
+                Some(ty) => {
+                    resolve_method(ty, &callee, &file_str).or_else(|| resolve(&callee, &file_str))
+                }
+                None => resolve(&callee, &file_str),
+            };
+            if let (Some(src), Some(dst)) = (resolve(&caller, &file_str), dst) {
                 if src != dst {
                     graph.add_edge(Edge {
                         src,
@@ -149,6 +170,18 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
     graph.set_ranks(&ranks);
 
     Ok(graph)
+}
+
+/// Simple owner-type ident of a method fqn (`Foo::bar` -> `Foo`), or `None` when
+/// the fqn is not a method (no `::`).
+fn simple_owner(fqn: &str) -> Option<String> {
+    let owner = fqn.rsplit_once("::")?.0;
+    let ident: String = owner
+        .trim()
+        .chars()
+        .take_while(|c| c.is_alphanumeric() || *c == '_')
+        .collect();
+    (!ident.is_empty()).then_some(ident)
 }
 
 #[cfg(test)]
@@ -216,18 +249,47 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("create dir");
         std::fs::write(
             dir.join("s.rs"),
-            "struct A;\nstruct B;\nimpl A { fn make() {} }\nimpl B { fn make() {} }\nfn go() { A::make(); }\n",
+            "struct A;\nstruct B;\nimpl A { fn make(&self) {} }\nimpl B { fn make(&self) {} }\nfn go(x: A) { x.make(); }\n",
         )
         .expect("w");
 
         let graph = build_graph(&dir).expect("build failed");
-        // `make` is defined twice in the same file, so the call cannot resolve.
+        // `make` is ambiguous by name and `x`'s type is not tracked, so the call
+        // is dropped rather than linked to the wrong `make`.
         let calls = graph
             .edges()
             .iter()
             .filter(|e| e.kind == EdgeKind::Calls)
             .count();
         assert_eq!(calls, 0);
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn test_self_method_resolves_via_type() {
+        let dir = std::env::temp_dir().join("codegraph_selfmethod_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create dir");
+        std::fs::write(
+            dir.join("s.rs"),
+            "struct A;\nstruct B;\nimpl A { fn helper(&self) {} fn go(&self) { self.helper(); } }\nimpl B { fn helper(&self) {} }\n",
+        )
+        .expect("w");
+
+        let graph = build_graph(&dir).expect("build failed");
+        let id = |fqn: &str| graph.nodes().iter().find(|n| n.fqn == fqn).map(|n| n.id);
+        let go = id("A::go").expect("A::go");
+        let helper = id("A::helper").expect("A::helper");
+        // `self.helper()` resolves to A::helper via the Self type, even though the
+        // bare name `helper` is ambiguous (B has one too).
+        assert!(
+            graph
+                .edges()
+                .iter()
+                .any(|e| e.kind == EdgeKind::Calls && e.src == go && e.dst == helper),
+            "self.helper() should resolve to A::helper"
+        );
 
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }

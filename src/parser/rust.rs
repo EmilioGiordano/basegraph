@@ -198,7 +198,10 @@ impl super::LanguageParser for RustParser {
 }
 
 impl RustParser {
-    pub fn parse_calls(source: &str) -> Vec<(String, String)> {
+    /// Extract `(caller, callee, receiver_type)` triples. `receiver_type` is the
+    /// type qualifying the call (`self`'s type for `self.m()`, or `T` for `T::m()`)
+    /// when known, letting the builder resolve method calls precisely by type.
+    pub fn parse_calls(source: &str) -> Vec<(String, String, Option<String>)> {
         let ast = match syn::parse_file(source) {
             Ok(f) => f,
             Err(_) => return Vec::new(),
@@ -339,7 +342,8 @@ fn collect_type_idents(ty: &syn::Type, f: &mut impl FnMut(String)) {
 #[derive(Default)]
 struct CallVisitor {
     scope: Vec<String>,
-    calls: Vec<(String, String)>,
+    self_ty: Vec<String>,
+    calls: Vec<(String, String, Option<String>)>,
     type_uses: Vec<(String, String)>,
 }
 
@@ -356,18 +360,41 @@ impl<'ast> Visit<'ast> for CallVisitor {
         self.scope.pop();
     }
 
+    fn visit_item_impl(&mut self, node: &'ast syn::ItemImpl) {
+        let ty = type_ident(&node.self_ty);
+        if let Some(t) = ty.clone() {
+            self.self_ty.push(t);
+        }
+        visit::visit_item_impl(self, node);
+        if ty.is_some() {
+            self.self_ty.pop();
+        }
+    }
+
     fn visit_expr_call(&mut self, node: &'ast syn::ExprCall) {
-        if let (Some(caller), Expr::Path(path)) = (self.scope.last(), &*node.func) {
-            if let Some(seg) = path.path.segments.last() {
-                self.calls.push((caller.clone(), seg.ident.to_string()));
+        if let (Some(caller), Expr::Path(path)) = (self.scope.last().cloned(), &*node.func) {
+            let segs = &path.path.segments;
+            if let Some(method) = segs.last() {
+                // `T::method()` resolves via the qualifying type; bare `f()` by name.
+                let recv = if segs.len() >= 2 {
+                    segs.iter().nth(segs.len() - 2).map(|s| s.ident.to_string())
+                } else {
+                    None
+                };
+                self.calls.push((caller, method.ident.to_string(), recv));
             }
         }
         visit::visit_expr_call(self, node);
     }
 
     fn visit_expr_method_call(&mut self, node: &'ast syn::ExprMethodCall) {
-        if let Some(caller) = self.scope.last() {
-            self.calls.push((caller.clone(), node.method.to_string()));
+        if let Some(caller) = self.scope.last().cloned() {
+            // `self.method()` resolves against the enclosing impl's Self type.
+            let recv = match &*node.receiver {
+                Expr::Path(p) if p.path.is_ident("self") => self.self_ty.last().cloned(),
+                _ => None,
+            };
+            self.calls.push((caller, node.method.to_string(), recv));
         }
         visit::visit_expr_method_call(self, node);
     }
