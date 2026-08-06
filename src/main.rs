@@ -159,17 +159,22 @@ fn print_result(result: &QueryResult, format: Format) -> Result<()> {
             println!("{json}");
         }
         Format::Text => {
+            if let Some(note) = &result.note {
+                println!("{note}");
+            }
             for item in &result.items {
                 println!("{}", item.render());
             }
             if result.truncated {
                 println!("... (truncated to fit token budget)");
             }
-            let r = &result.token_report;
-            println!(
-                "-- {} bundle tokens vs ~{} full-source tokens ({:.1}x saved)",
-                r.bundle_tokens, r.full_source_tokens, r.savings_ratio
-            );
+            if !result.items.is_empty() {
+                let r = &result.token_report;
+                println!(
+                    "-- {} bundle tokens vs ~{} full-source tokens ({:.1}x saved)",
+                    r.bundle_tokens, r.full_source_tokens, r.savings_ratio
+                );
+            }
         }
     }
     Ok(())

@@ -96,6 +96,8 @@ pub struct QueryResult {
     pub items: Vec<ItemView>,
     pub truncated: bool,
     pub token_report: TokenReport,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
 }
 
 fn estimate_full_tokens(views: &[ItemView], counter: &dyn TokenCounter) -> usize {
@@ -145,6 +147,7 @@ fn assemble(views: Vec<ItemView>, budget: usize, counter: &dyn TokenCounter) -> 
             full_source_tokens,
             savings_ratio,
         },
+        note: None,
     }
 }
 
@@ -268,7 +271,11 @@ pub fn context(
         })
         .collect();
 
-    assemble(views, budget, counter)
+    let mut result = assemble(views, budget, counter);
+    if matches.is_empty() {
+        result.note = Some(format!("no symbol named '{target}' found; try `search`"));
+    }
+    result
 }
 
 #[cfg(test)]
@@ -330,6 +337,16 @@ mod tests {
 
         let hits2 = search(&g, "gamma", 10);
         assert_eq!(hits2[0].fqn, "gamma");
+    }
+
+    #[test]
+    fn test_context_not_found() {
+        let g = sample_graph();
+        let counter = HeuristicCounter;
+
+        let res = context(&g, "does_not_exist", 100_000, &counter);
+        assert!(res.items.is_empty());
+        assert!(res.note.is_some());
     }
 
     #[test]
