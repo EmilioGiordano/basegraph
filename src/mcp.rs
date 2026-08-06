@@ -1,7 +1,7 @@
 //! Minimal stdio JSON-RPC server implementing the MCP protocol (2025-11-25).
 //!
-//! Exposes `map`, `context` and `search` as MCP tools over one codebase so any
-//! MCP client (Claude Code, Cursor, ...) can query the graph natively.
+//! Exposes `map`, `context`, `search` and `show` as MCP tools over one codebase
+//! so any MCP client (Claude Code, Cursor, ...) can query the graph natively.
 
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -144,7 +144,7 @@ impl ServerState {
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "codegraph", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "Query a codebase's structure cheaply: `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, `map` to orient in the whole project."
+                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source."
             }),
         )
     }
