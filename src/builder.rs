@@ -72,16 +72,35 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
         }
     }
 
-    let mut name_to_id: HashMap<String, NodeId> = HashMap::new();
+    let mut by_name: HashMap<String, Vec<(NodeId, String)>> = HashMap::new();
     for node in graph.nodes() {
-        name_to_id.entry(node.name.clone()).or_insert(node.id);
+        by_name
+            .entry(node.name.clone())
+            .or_default()
+            .push((node.id, node.file.clone()));
     }
+    // Prefer a definition in the calling file; otherwise accept the name only if
+    // it is globally unique. Ambiguous names (`map`, `new`, ...) yield no edge
+    // rather than a phantom one to an unrelated definition.
+    let resolve = |name: &str, file: &str| -> Option<NodeId> {
+        let candidates = by_name.get(name)?;
+        if let Some((id, _)) = candidates.iter().find(|(_, f)| f.as_str() == file) {
+            Some(*id)
+        } else if candidates.len() == 1 {
+            Some(candidates[0].0)
+        } else {
+            None
+        }
+    };
     for file in &files {
         let Ok(content) = std::fs::read_to_string(file) else {
             continue;
         };
+        let file_str = file.to_string_lossy();
         for (caller, callee) in RustParser::parse_calls(&content) {
-            if let (Some(&src), Some(&dst)) = (name_to_id.get(&caller), name_to_id.get(&callee)) {
+            if let (Some(src), Some(dst)) =
+                (resolve(&caller, &file_str), resolve(&callee, &file_str))
+            {
                 if src != dst {
                     graph.add_edge(Edge {
                         src,
@@ -111,6 +130,26 @@ mod tests {
         let graph = build_graph(&dir).expect("build failed");
         assert_eq!(graph.nodes().len(), 2);
         assert!(!graph.edges().is_empty());
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn test_ambiguous_calls_are_skipped() {
+        let dir = std::env::temp_dir().join("codegraph_ambiguous_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create dir");
+        std::fs::write(dir.join("one.rs"), "fn shared() {}\n").expect("w1");
+        std::fs::write(dir.join("two.rs"), "fn shared() {}\n").expect("w2");
+        std::fs::write(
+            dir.join("caller.rs"),
+            "fn unique() {}\nfn go() { shared(); unique(); }\n",
+        )
+        .expect("w3");
+
+        let graph = build_graph(&dir).expect("build failed");
+        // Only `go -> unique` survives; the ambiguous `shared()` call is dropped.
+        assert_eq!(graph.edges().len(), 1);
 
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
