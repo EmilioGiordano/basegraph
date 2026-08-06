@@ -64,6 +64,13 @@ enum Command {
         #[arg(long, value_enum, default_value_t = Format::Json)]
         format: Format,
     },
+    /// Print the full source of a symbol, read live from its file.
+    Show {
+        dir: PathBuf,
+        symbol: String,
+        #[arg(long)]
+        cache: Option<PathBuf>,
+    },
     /// Run an MCP server over stdio, exposing map/context/search for the codebase.
     Mcp { dir: PathBuf },
 }
@@ -131,6 +138,11 @@ fn main() -> Result<()> {
             let graph = JsonCache::new(&path).load().context("loading cache")?;
             let items = query::search(&graph, &query, limit);
             print_items(&items, format)?;
+        }
+        Command::Show { dir, symbol, cache } => {
+            let path = cache_path(&dir, cache);
+            let graph = JsonCache::new(&path).load().context("loading cache")?;
+            print!("{}", query::show(&graph, &symbol));
         }
         Command::Mcp { dir } => {
             codegraph::mcp::serve(dir)?;

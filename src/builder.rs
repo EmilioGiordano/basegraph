@@ -374,4 +374,26 @@ mod tests {
 
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
+
+    #[test]
+    fn test_show_returns_method_body() {
+        let dir = std::env::temp_dir().join("codegraph_show_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create dir");
+        std::fs::write(
+            dir.join("m.rs"),
+            "struct S;\nimpl S {\n    fn compute(&self) -> i32 {\n        let base = 40;\n        base + 2\n    }\n}\n",
+        )
+        .expect("w");
+
+        let graph = build_graph(&dir).expect("build failed");
+        // Requires the method line range to cover the body, not just the signature.
+        let src = crate::query::show(&graph, "S::compute");
+        assert!(
+            src.contains("base + 2"),
+            "show should include the method body, got: {src}"
+        );
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
 }

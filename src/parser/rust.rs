@@ -171,9 +171,12 @@ impl super::LanguageParser for RustParser {
                     let self_ty = &item_impl.self_ty;
                     let self_ty_str = format!("{}", quote! { #self_ty });
                     for impl_item in item_impl.items {
-                        if let ImplItem::Fn(ImplItemFn { sig, attrs, .. }) = impl_item {
+                        if let ImplItem::Fn(method) = impl_item {
+                            let sig = &method.sig;
                             let signature = format!("{}", quote! { #sig });
                             let name = sig.ident.to_string();
+                            // Full method span (signature + body) so `show` can read the body.
+                            let span = method.span();
                             nodes.push(Node {
                                 id: NodeId(id_counter),
                                 kind: NodeKind::Method,
@@ -181,9 +184,9 @@ impl super::LanguageParser for RustParser {
                                 name,
                                 signature,
                                 file: file.to_string(),
-                                line_start: sig.span().start().line,
-                                line_end: sig.span().end().line,
-                                doc: Self::extract_docs(&attrs),
+                                line_start: span.start().line,
+                                line_end: span.end().line,
+                                doc: Self::extract_docs(&method.attrs),
                             });
                             id_counter += 1;
                         }

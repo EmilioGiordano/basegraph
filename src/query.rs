@@ -227,6 +227,37 @@ pub fn search(graph: &Graph, query: &str, limit: usize) -> Vec<ItemView> {
         .collect()
 }
 
+/// Return the full source of each symbol matching `target` (by name or fqn), read
+/// live from its file using the node's stored line range.
+pub fn show(graph: &Graph, target: &str) -> String {
+    let matches: Vec<&Node> = graph
+        .nodes()
+        .iter()
+        .filter(|n| n.fqn == target || n.name == target)
+        .collect();
+    if matches.is_empty() {
+        return format!("no symbol named '{target}' found; try `search`\n");
+    }
+    let mut out = String::new();
+    for n in &matches {
+        out.push_str(&format!("// {} ({}:{})\n", n.fqn, n.file, n.line_start));
+        match read_span(&n.file, n.line_start, n.line_end) {
+            Some(src) => out.push_str(&src),
+            None => out.push_str("(source unavailable)"),
+        }
+        out.push_str("\n\n");
+    }
+    out
+}
+
+fn read_span(file: &str, start: usize, end: usize) -> Option<String> {
+    let content = std::fs::read_to_string(file).ok()?;
+    let lines: Vec<&str> = content.lines().collect();
+    let s = start.saturating_sub(1);
+    let e = end.min(lines.len());
+    (s < e).then(|| lines[s..e].join("\n"))
+}
+
 fn add_relation(acc: &mut Vec<(NodeId, Relation)>, id: NodeId, rel: Relation) {
     if let Some(entry) = acc.iter_mut().find(|(eid, _)| *eid == id) {
         if rel.priority() > entry.1.priority() {
