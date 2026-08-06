@@ -388,10 +388,35 @@ mod tests {
 
         let graph = build_graph(&dir).expect("build failed");
         // Requires the method line range to cover the body, not just the signature.
-        let src = crate::query::show(&graph, "S::compute");
+        let src = crate::query::show(&graph, "S::compute", &crate::query::ShowMode::Full);
         assert!(
             src.contains("base + 2"),
             "show should include the method body, got: {src}"
+        );
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn test_show_outline_lists_match_arms() {
+        let dir = std::env::temp_dir().join("codegraph_outline_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create dir");
+        std::fs::write(
+            dir.join("d.rs"),
+            "fn dispatch(x: u8) -> u8 {\n    match x {\n        0 => 10,\n        1 => 20,\n        _ => 0,\n    }\n}\n",
+        )
+        .expect("w");
+
+        let graph = build_graph(&dir).expect("build failed");
+        let out = crate::query::show(&graph, "dispatch", &crate::query::ShowMode::Outline);
+        assert!(
+            out.contains("match x"),
+            "outline should show the match, got: {out}"
+        );
+        assert!(
+            out.contains("0 => 10"),
+            "outline should list arms, got: {out}"
         );
 
         std::fs::remove_dir_all(&dir).expect("cleanup");

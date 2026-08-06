@@ -64,10 +64,18 @@ enum Command {
         #[arg(long, value_enum, default_value_t = Format::Json)]
         format: Format,
     },
-    /// Print the full source of a symbol, read live from its file.
+    /// Print a symbol's source: capped by default, or --full / --range X:Y / --grep <text> / --outline.
     Show {
         dir: PathBuf,
         symbol: String,
+        #[arg(long)]
+        full: bool,
+        #[arg(long)]
+        range: Option<String>,
+        #[arg(long)]
+        grep: Option<String>,
+        #[arg(long)]
+        outline: bool,
         #[arg(long)]
         cache: Option<PathBuf>,
     },
@@ -83,6 +91,17 @@ enum Format {
 
 fn cache_path(dir: &Path, cache: Option<PathBuf>) -> PathBuf {
     cache.unwrap_or_else(|| dir.join(CACHE_FILE))
+}
+
+fn parse_range(s: &str) -> Result<(usize, Option<usize>)> {
+    let (a, b) = s.split_once(':').unwrap_or((s, ""));
+    let start: usize = a.trim().parse().context("range start")?;
+    let end = if b.trim().is_empty() {
+        None
+    } else {
+        Some(b.trim().parse().context("range end")?)
+    };
+    Ok((start, end))
 }
 
 fn main() -> Result<()> {
@@ -139,10 +158,30 @@ fn main() -> Result<()> {
             let items = query::search(&graph, &query, limit);
             print_items(&items, format)?;
         }
-        Command::Show { dir, symbol, cache } => {
+        Command::Show {
+            dir,
+            symbol,
+            full,
+            range,
+            grep,
+            outline,
+            cache,
+        } => {
+            let mode = if outline {
+                query::ShowMode::Outline
+            } else if let Some(pattern) = grep {
+                query::ShowMode::Grep(pattern)
+            } else if let Some(r) = range {
+                let (a, b) = parse_range(&r).context("invalid --range (use X:Y or X:)")?;
+                query::ShowMode::Range(a, b)
+            } else if full {
+                query::ShowMode::Full
+            } else {
+                query::ShowMode::Default
+            };
             let path = cache_path(&dir, cache);
             let graph = JsonCache::new(&path).load().context("loading cache")?;
-            print!("{}", query::show(&graph, &symbol));
+            print!("{}", query::show(&graph, &symbol, &mode));
         }
         Command::Mcp { dir } => {
             codegraph::mcp::serve(dir)?;

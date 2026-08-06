@@ -75,9 +75,14 @@ impl ItemView {
             Some(rel) => format!("[{}] ", rel.tag()),
             None => String::new(),
         };
+        let loc = if self.line_end > self.line_start {
+            format!("{}:{}-{}", self.file, self.line_start, self.line_end)
+        } else {
+            format!("{}:{}", self.file, self.line_start)
+        };
         format!(
-            "{prefix}[{:?}] {} :: {}  ({}:{})",
-            self.kind, self.fqn, self.signature, self.file, self.line_start
+            "{prefix}[{:?}] {} :: {}  ({loc})",
+            self.kind, self.fqn, self.signature
         )
     }
 }
@@ -227,9 +232,25 @@ pub fn search(graph: &Graph, query: &str, limit: usize) -> Vec<ItemView> {
         .collect()
 }
 
-/// Return the full source of each symbol matching `target` (by name or fqn), read
-/// live from its file using the node's stored line range.
-pub fn show(graph: &Graph, target: &str) -> String {
+/// How `show` renders a symbol's source.
+pub enum ShowMode {
+    /// Capped preview plus a header with the total line count.
+    Default,
+    /// The entire body.
+    Full,
+    /// Absolute file lines `start..=end` (end defaults to the symbol's last line).
+    Range(usize, Option<usize>),
+    /// Only lines matching a substring, with a little surrounding context.
+    Grep(String),
+    /// A skeleton: the signature plus control-flow headers and match arms.
+    Outline,
+}
+
+const SHOW_CAP: usize = 200;
+
+/// Render the source of each symbol matching `target` (by name or fqn) according
+/// to `mode`, read live from the file by the node's line range.
+pub fn show(graph: &Graph, target: &str, mode: &ShowMode) -> String {
     let matches: Vec<&Node> = graph
         .nodes()
         .iter()
@@ -240,22 +261,86 @@ pub fn show(graph: &Graph, target: &str) -> String {
     }
     let mut out = String::new();
     for n in &matches {
-        out.push_str(&format!("// {} ({}:{})\n", n.fqn, n.file, n.line_start));
-        match read_span(&n.file, n.line_start, n.line_end) {
-            Some(src) => out.push_str(&src),
-            None => out.push_str("(source unavailable)"),
+        let total = n.line_end.saturating_sub(n.line_start) + 1;
+        out.push_str(&format!(
+            "// {} ({}:{}-{}, {total} lines)\n",
+            n.fqn, n.file, n.line_start, n.line_end
+        ));
+        let Ok(content) = std::fs::read_to_string(&n.file) else {
+            out.push_str("(source unavailable)\n\n");
+            continue;
+        };
+        let file: Vec<&str> = content.lines().collect();
+        let span = |a: usize, b: usize| -> String {
+            let s = a.saturating_sub(1);
+            let e = b.min(file.len());
+            if s < e {
+                file[s..e].join("\n")
+            } else {
+                String::new()
+            }
+        };
+        let numbered = |a: usize, b: usize| -> String {
+            (a..=b.min(file.len()))
+                .filter_map(|i| file.get(i - 1).map(|l| format!("{i:>5}: {l}")))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+        match mode {
+            ShowMode::Full => out.push_str(&span(n.line_start, n.line_end)),
+            ShowMode::Default => {
+                if total <= SHOW_CAP {
+                    out.push_str(&span(n.line_start, n.line_end));
+                } else {
+                    out.push_str(&span(n.line_start, n.line_start + SHOW_CAP - 1));
+                    out.push_str(&format!(
+                        "\n... ({SHOW_CAP} of {total} lines; use --full, --range {}:{}, --grep <text>, or --outline)",
+                        n.line_start, n.line_end
+                    ));
+                }
+            }
+            ShowMode::Range(a, b) => {
+                let start = (*a).max(n.line_start);
+                let end = b.unwrap_or(n.line_end).min(n.line_end);
+                out.push_str(&numbered(start, end));
+            }
+            ShowMode::Grep(pat) => {
+                let needle = pat.to_lowercase();
+                let mut hits = 0;
+                for i in n.line_start..=n.line_end {
+                    if file
+                        .get(i - 1)
+                        .is_some_and(|l| l.to_lowercase().contains(&needle))
+                    {
+                        let cs = i.saturating_sub(2).max(n.line_start);
+                        let ce = (i + 2).min(n.line_end);
+                        out.push_str(&numbered(cs, ce));
+                        out.push_str("\n  --\n");
+                        hits += 1;
+                    }
+                }
+                if hits == 0 {
+                    out.push_str(&format!("(no lines matching '{pat}')"));
+                }
+            }
+            ShowMode::Outline => {
+                let mut lines = vec![n.line_start];
+                lines.extend(crate::parser::rust::RustParser::parse_outline(
+                    &content,
+                    n.line_start,
+                ));
+                lines.sort_unstable();
+                lines.dedup();
+                for l in lines {
+                    if let Some(txt) = file.get(l - 1) {
+                        out.push_str(&format!("{l:>5}: {txt}\n"));
+                    }
+                }
+            }
         }
         out.push_str("\n\n");
     }
     out
-}
-
-fn read_span(file: &str, start: usize, end: usize) -> Option<String> {
-    let content = std::fs::read_to_string(file).ok()?;
-    let lines: Vec<&str> = content.lines().collect();
-    let s = start.saturating_sub(1);
-    let e = end.min(lines.len());
-    (s < e).then(|| lines[s..e].join("\n"))
 }
 
 fn add_relation(acc: &mut Vec<(NodeId, Relation)>, id: NodeId, rel: Relation) {

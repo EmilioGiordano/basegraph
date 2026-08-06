@@ -488,6 +488,68 @@ impl<'ast> Visit<'ast> for CallVisitor {
     }
 }
 
+impl RustParser {
+    /// Structural line numbers (control-flow headers and match arms) inside the
+    /// function/method that starts at `target_line`, for an outline view.
+    pub fn parse_outline(source: &str, target_line: usize) -> Vec<usize> {
+        let ast = match syn::parse_file(source) {
+            Ok(f) => f,
+            Err(_) => return Vec::new(),
+        };
+        let mut v = OutlineVisitor::default();
+        for item in &ast.items {
+            match item {
+                Item::Fn(f) if f.span().start().line == target_line => v.visit_block(&f.block),
+                Item::Impl(item_impl) => {
+                    for impl_item in &item_impl.items {
+                        if let ImplItem::Fn(m) = impl_item {
+                            if m.span().start().line == target_line {
+                                v.visit_block(&m.block);
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        v.lines.sort_unstable();
+        v.lines.dedup();
+        v.lines
+    }
+}
+
+#[derive(Default)]
+struct OutlineVisitor {
+    lines: Vec<usize>,
+}
+
+impl<'ast> Visit<'ast> for OutlineVisitor {
+    fn visit_arm(&mut self, node: &'ast syn::Arm) {
+        self.lines.push(node.span().start().line);
+        visit::visit_arm(self, node);
+    }
+    fn visit_expr_if(&mut self, node: &'ast syn::ExprIf) {
+        self.lines.push(node.span().start().line);
+        visit::visit_expr_if(self, node);
+    }
+    fn visit_expr_match(&mut self, node: &'ast syn::ExprMatch) {
+        self.lines.push(node.span().start().line);
+        visit::visit_expr_match(self, node);
+    }
+    fn visit_expr_for_loop(&mut self, node: &'ast syn::ExprForLoop) {
+        self.lines.push(node.span().start().line);
+        visit::visit_expr_for_loop(self, node);
+    }
+    fn visit_expr_while(&mut self, node: &'ast syn::ExprWhile) {
+        self.lines.push(node.span().start().line);
+        visit::visit_expr_while(self, node);
+    }
+    fn visit_expr_loop(&mut self, node: &'ast syn::ExprLoop) {
+        self.lines.push(node.span().start().line);
+        visit::visit_expr_loop(self, node);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
