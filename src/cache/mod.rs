@@ -24,4 +24,7 @@ pub enum CacheError {
     /// A (de)serialization error.
     #[error("serialization error: {0}")]
     Serde(#[from] serde_json::Error),
+    /// The cache was written by an incompatible format version.
+    #[error("cache format version {found}, expected {expected}; rebuild with `codegraph build`")]
+    Incompatible { found: u32, expected: u32 },
 }

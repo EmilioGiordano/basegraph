@@ -17,16 +17,44 @@ impl JsonCache {
     }
 }
 
+/// Current on-disk cache format version. Bump when the graph schema changes.
+const CURRENT_VERSION: u32 = 1;
+
+#[derive(serde::Serialize)]
+struct CacheEnvelopeRef<'a> {
+    version: u32,
+    graph: &'a Graph,
+}
+
 impl Cache for JsonCache {
     fn save(&self, graph: &Graph) -> Result<(), CacheError> {
-        let data = serde_json::to_string_pretty(graph)?;
+        let envelope = CacheEnvelopeRef {
+            version: CURRENT_VERSION,
+            graph,
+        };
+        let data = serde_json::to_string_pretty(&envelope)?;
         std::fs::write(&self.path, data)?;
         Ok(())
     }
 
     fn load(&self) -> Result<Graph, CacheError> {
         let data = std::fs::read_to_string(&self.path)?;
-        let graph = serde_json::from_str(&data)?;
+        let mut value: serde_json::Value = serde_json::from_str(&data)?;
+        let version = value
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32;
+        if version != CURRENT_VERSION {
+            return Err(CacheError::Incompatible {
+                found: version,
+                expected: CURRENT_VERSION,
+            });
+        }
+        let graph_value = value
+            .get_mut("graph")
+            .map(serde_json::Value::take)
+            .unwrap_or(serde_json::Value::Null);
+        let graph = serde_json::from_value(graph_value)?;
         Ok(graph)
     }
 }
@@ -66,5 +94,18 @@ mod tests {
         assert_eq!(loaded.edges().len(), graph.edges().len());
 
         std::fs::remove_file(&path).expect("cleanup failed");
+    }
+
+    #[test]
+    fn test_rejects_incompatible_cache() {
+        let path = std::env::temp_dir().join("codegraph_cache_incompat_test.json");
+        std::fs::write(&path, r#"{"nodes":[],"edges":[]}"#).expect("write");
+
+        let err = JsonCache::new(&path)
+            .load()
+            .expect_err("should reject old format");
+        assert!(matches!(err, CacheError::Incompatible { .. }));
+
+        std::fs::remove_file(&path).ok();
     }
 }
