@@ -56,7 +56,7 @@ to read the code and act — and **mcp** to expose all of it to an agent.
 | `search <dir> <q>`  | Find symbols by name / fqn, ranked by relevance and centrality                                        | `--limit`, `--format`                  |
 | `context <dir> <s>` | A symbol's neighborhood, each line labeled: caller/callee/implements/implementor/uses/used-by/co-located | `--budget`, `--format`              |
 | `show <dir> <s>`    | Read a symbol's source live from the file                                                             | `--full`, `--range`, `--grep`, `--outline`, `--pretty` |
-| `mcp <dir>`         | MCP server over stdio, exposing map/context/search to any MCP client                                  | —                                      |
+| `mcp <dir>`         | MCP server over stdio, exposing map/context/search/show to any MCP client                             | —                                      |
 
 All commands accept `--cache <path>` (default `<dir>/codegraph.json`); query commands
 accept `--format json|text`. See [Reading source with `show`](#reading-source-with-show)
@@ -124,8 +124,8 @@ Run CodeGraph as an MCP server over stdio for one codebase:
 codegraph mcp ./my-project
 ```
 
-It exposes three tools — `map`, `context`, `search` — loads the graph once, and
-reloads automatically when the cache changes on disk.
+It exposes four tools — `map`, `context`, `search`, `show` — loads the graph once,
+and reloads automatically when the cache changes on disk.
 
 Register it with Claude Code:
 
