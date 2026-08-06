@@ -125,7 +125,11 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
                 }
             }
         }
-        for (owner, type_name) in RustParser::parse_uses(&content) {
+        let mut uses = RustParser::parse_uses(&content);
+        uses.extend(RustParser::parse_type_uses(&content));
+        uses.sort();
+        uses.dedup();
+        for (owner, type_name) in uses {
             if let (Some(src), Some(dst)) =
                 (resolve(&owner, &file_str), resolve(&type_name, &file_str))
             {
@@ -221,6 +225,41 @@ mod tests {
             .filter(|e| e.kind == EdgeKind::Calls)
             .count();
         assert_eq!(calls, 0);
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn test_enum_construction_credits_enum() {
+        let dir = std::env::temp_dir().join("codegraph_enumuse_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create dir");
+        std::fs::write(
+            dir.join("e.rs"),
+            "enum Ev { A, B(u8) }\nfn emit() { let _x = Ev::B(1); let _y = Ev::A; }\n",
+        )
+        .expect("w");
+
+        let graph = build_graph(&dir).expect("build failed");
+        let ev = graph
+            .nodes()
+            .iter()
+            .find(|n| n.name == "Ev")
+            .expect("Ev")
+            .id;
+        let emit = graph
+            .nodes()
+            .iter()
+            .find(|n| n.name == "emit")
+            .expect("emit")
+            .id;
+        assert!(
+            graph
+                .edges()
+                .iter()
+                .any(|e| e.kind == EdgeKind::Uses && e.src == emit && e.dst == ev),
+            "expected a Uses edge emit -> Ev"
+        );
 
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }

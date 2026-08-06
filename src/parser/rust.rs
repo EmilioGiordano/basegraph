@@ -208,6 +208,18 @@ impl RustParser {
         visitor.calls
     }
 
+    /// Extract `(owner, type)` pairs from expression bodies: types named via a
+    /// qualified path (`Enum::Variant`, `Type::assoc`) or a struct literal.
+    pub fn parse_type_uses(source: &str) -> Vec<(String, String)> {
+        let ast = match syn::parse_file(source) {
+            Ok(f) => f,
+            Err(_) => return Vec::new(),
+        };
+        let mut visitor = CallVisitor::default();
+        visitor.visit_file(&ast);
+        visitor.type_uses
+    }
+
     /// Extract `(type_name, trait_name)` pairs from `impl Trait for Type` blocks.
     pub fn parse_impls(source: &str) -> Vec<(String, String)> {
         let ast = match syn::parse_file(source) {
@@ -328,6 +340,7 @@ fn collect_type_idents(ty: &syn::Type, f: &mut impl FnMut(String)) {
 struct CallVisitor {
     scope: Vec<String>,
     calls: Vec<(String, String)>,
+    type_uses: Vec<(String, String)>,
 }
 
 impl<'ast> Visit<'ast> for CallVisitor {
@@ -357,6 +370,28 @@ impl<'ast> Visit<'ast> for CallVisitor {
             self.calls.push((caller.clone(), node.method.to_string()));
         }
         visit::visit_expr_method_call(self, node);
+    }
+
+    fn visit_expr_path(&mut self, node: &'ast syn::ExprPath) {
+        if let Some(caller) = self.scope.last() {
+            let n = node.path.segments.len();
+            if n >= 2 {
+                if let Some(seg) = node.path.segments.iter().nth(n - 2) {
+                    self.type_uses.push((caller.clone(), seg.ident.to_string()));
+                }
+            }
+        }
+        visit::visit_expr_path(self, node);
+    }
+
+    fn visit_expr_struct(&mut self, node: &'ast syn::ExprStruct) {
+        if let Some(caller) = self.scope.last() {
+            let idx = node.path.segments.len().saturating_sub(2);
+            if let Some(seg) = node.path.segments.iter().nth(idx) {
+                self.type_uses.push((caller.clone(), seg.ident.to_string()));
+            }
+        }
+        visit::visit_expr_struct(self, node);
     }
 }
 
