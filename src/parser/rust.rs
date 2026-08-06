@@ -229,6 +229,49 @@ impl RustParser {
         }
         out
     }
+
+    /// Extract `(owner, type)` pairs: each symbol and the named types it references
+    /// in its signature or fields. Feeds `Uses` edges so types gain centrality.
+    pub fn parse_uses(source: &str) -> Vec<(String, String)> {
+        let ast = match syn::parse_file(source) {
+            Ok(f) => f,
+            Err(_) => return Vec::new(),
+        };
+        let mut out = Vec::new();
+        for item in &ast.items {
+            match item {
+                Item::Fn(f) => collect_sig_uses(&f.sig.ident.to_string(), &f.sig, &mut out),
+                Item::Impl(item_impl) => {
+                    let self_ty = type_ident(&item_impl.self_ty);
+                    for impl_item in &item_impl.items {
+                        if let ImplItem::Fn(m) = impl_item {
+                            let owner = m.sig.ident.to_string();
+                            if let Some(ty) = &self_ty {
+                                out.push((owner.clone(), ty.clone()));
+                            }
+                            collect_sig_uses(&owner, &m.sig, &mut out);
+                        }
+                    }
+                }
+                Item::Struct(s) => {
+                    let owner = s.ident.to_string();
+                    for field in &s.fields {
+                        collect_type_idents(&field.ty, &mut |t| out.push((owner.clone(), t)));
+                    }
+                }
+                Item::Enum(e) => {
+                    let owner = e.ident.to_string();
+                    for variant in &e.variants {
+                        for field in &variant.fields {
+                            collect_type_idents(&field.ty, &mut |t| out.push((owner.clone(), t)));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
 }
 
 /// The final path segment ident of a named type, if it is one.
@@ -236,6 +279,48 @@ fn type_ident(ty: &syn::Type) -> Option<String> {
     match ty {
         syn::Type::Path(tp) => tp.path.segments.last().map(|s| s.ident.to_string()),
         _ => None,
+    }
+}
+
+/// Collect the type idents referenced in a function signature (params + return).
+fn collect_sig_uses(owner: &str, sig: &syn::Signature, out: &mut Vec<(String, String)>) {
+    for input in &sig.inputs {
+        if let syn::FnArg::Typed(pat) = input {
+            collect_type_idents(&pat.ty, &mut |t| out.push((owner.to_string(), t)));
+        }
+    }
+    if let syn::ReturnType::Type(_, ty) = &sig.output {
+        collect_type_idents(ty, &mut |t| out.push((owner.to_string(), t)));
+    }
+}
+
+/// Recursively collect the last-segment idents of every named type inside `ty`,
+/// descending through references, containers and generic arguments.
+fn collect_type_idents(ty: &syn::Type, f: &mut impl FnMut(String)) {
+    match ty {
+        syn::Type::Path(tp) => {
+            if let Some(seg) = tp.path.segments.last() {
+                f(seg.ident.to_string());
+                if let syn::PathArguments::AngleBracketed(args) = &seg.arguments {
+                    for arg in &args.args {
+                        if let syn::GenericArgument::Type(inner) = arg {
+                            collect_type_idents(inner, f);
+                        }
+                    }
+                }
+            }
+        }
+        syn::Type::Reference(r) => collect_type_idents(&r.elem, f),
+        syn::Type::Slice(s) => collect_type_idents(&s.elem, f),
+        syn::Type::Array(a) => collect_type_idents(&a.elem, f),
+        syn::Type::Tuple(t) => {
+            for elem in &t.elems {
+                collect_type_idents(elem, f);
+            }
+        }
+        syn::Type::Paren(p) => collect_type_idents(&p.elem, f),
+        syn::Type::Group(g) => collect_type_idents(&g.elem, f),
+        _ => {}
     }
 }
 

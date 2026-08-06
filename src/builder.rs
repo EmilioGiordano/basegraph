@@ -84,12 +84,11 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
     // rather than a phantom one to an unrelated definition.
     let resolve = |name: &str, file: &str| -> Option<NodeId> {
         let candidates = by_name.get(name)?;
-        if let Some((id, _)) = candidates.iter().find(|(_, f)| f.as_str() == file) {
-            Some(*id)
-        } else if candidates.len() == 1 {
-            Some(candidates[0].0)
-        } else {
-            None
+        let mut same_file = candidates.iter().filter(|(_, f)| f.as_str() == file);
+        match (same_file.next(), same_file.next()) {
+            (Some((id, _)), None) => Some(*id),
+            (None, _) if candidates.len() == 1 => Some(candidates[0].0),
+            _ => None,
         }
     };
     for file in &files {
@@ -121,6 +120,20 @@ pub fn build_graph(root: &Path) -> Result<Graph, BuildError> {
                         src,
                         dst,
                         kind: EdgeKind::Implements,
+                        confidence: Confidence::Heuristic,
+                    });
+                }
+            }
+        }
+        for (owner, type_name) in RustParser::parse_uses(&content) {
+            if let (Some(src), Some(dst)) =
+                (resolve(&owner, &file_str), resolve(&type_name, &file_str))
+            {
+                if src != dst {
+                    graph.add_edge(Edge {
+                        src,
+                        dst,
+                        kind: EdgeKind::Uses,
                         confidence: Confidence::Heuristic,
                     });
                 }
@@ -185,6 +198,29 @@ mod tests {
             graph.edges().iter().any(|e| e.kind == EdgeKind::Implements),
             "expected an Implements edge"
         );
+
+        std::fs::remove_dir_all(&dir).expect("cleanup");
+    }
+
+    #[test]
+    fn test_same_file_ambiguity_is_skipped() {
+        let dir = std::env::temp_dir().join("codegraph_samefile_test");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("create dir");
+        std::fs::write(
+            dir.join("s.rs"),
+            "struct A;\nstruct B;\nimpl A { fn make() {} }\nimpl B { fn make() {} }\nfn go() { A::make(); }\n",
+        )
+        .expect("w");
+
+        let graph = build_graph(&dir).expect("build failed");
+        // `make` is defined twice in the same file, so the call cannot resolve.
+        let calls = graph
+            .edges()
+            .iter()
+            .filter(|e| e.kind == EdgeKind::Calls)
+            .count();
+        assert_eq!(calls, 0);
 
         std::fs::remove_dir_all(&dir).expect("cleanup");
     }
