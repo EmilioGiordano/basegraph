@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use codegraph::builder::build_graph;
 use codegraph::cache::{Cache, JsonCache};
-use codegraph::query::{self, QueryResult};
+use codegraph::query::{self, ItemView, QueryResult};
 use codegraph::tokens::HeuristicCounter;
 
 const CACHE_FILE: &str = "codegraph.json";
@@ -48,6 +48,17 @@ enum Command {
         symbol: String,
         #[arg(long, default_value_t = DEFAULT_BUDGET)]
         budget: usize,
+        #[arg(long)]
+        cache: Option<PathBuf>,
+        #[arg(long, value_enum, default_value_t = Format::Json)]
+        format: Format,
+    },
+    /// Find symbols by name or fully-qualified name.
+    Search {
+        dir: PathBuf,
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
         #[arg(long)]
         cache: Option<PathBuf>,
         #[arg(long, value_enum, default_value_t = Format::Json)]
@@ -106,6 +117,36 @@ fn main() -> Result<()> {
             let graph = JsonCache::new(&path).load().context("loading cache")?;
             let result = query::context(&graph, &symbol, budget, &HeuristicCounter);
             print_result(&result, format)?;
+        }
+        Command::Search {
+            dir,
+            query,
+            limit,
+            cache,
+            format,
+        } => {
+            let path = cache_path(&dir, cache);
+            let graph = JsonCache::new(&path).load().context("loading cache")?;
+            let items = query::search(&graph, &query, limit);
+            print_items(&items, format)?;
+        }
+    }
+    Ok(())
+}
+
+fn print_items(items: &[ItemView], format: Format) -> Result<()> {
+    match format {
+        Format::Json => {
+            let json = serde_json::to_string_pretty(items).context("serializing items")?;
+            println!("{json}");
+        }
+        Format::Text => {
+            for item in items {
+                println!("{}", item.render());
+            }
+            if items.is_empty() {
+                println!("(no matches)");
+            }
         }
     }
     Ok(())

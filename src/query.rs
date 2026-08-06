@@ -161,6 +161,40 @@ pub fn map(graph: &Graph, budget: usize, counter: &dyn TokenCounter) -> QueryRes
     assemble(views, budget, counter)
 }
 
+/// Find symbols whose name or fqn contains `query` (case-insensitive), ranked by
+/// match quality (exact name > name substring > fqn substring) then centrality.
+pub fn search(graph: &Graph, query: &str, limit: usize) -> Vec<ItemView> {
+    let q = query.to_lowercase();
+    let ranks = rank::pagerank(graph);
+    let mut scored: Vec<(u8, f64, &Node)> = graph
+        .nodes()
+        .iter()
+        .filter_map(|n| {
+            let name = n.name.to_lowercase();
+            let score = if name == q {
+                3
+            } else if name.contains(&q) {
+                2
+            } else if n.fqn.to_lowercase().contains(&q) {
+                1
+            } else {
+                return None;
+            };
+            Some((score, rank_of(&ranks, n.id), n))
+        })
+        .collect();
+    scored.sort_by(|a, b| {
+        b.0.cmp(&a.0)
+            .then_with(|| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal))
+            .then_with(|| a.2.fqn.cmp(&b.2.fqn))
+    });
+    scored
+        .into_iter()
+        .take(limit)
+        .map(|(_, _, n)| ItemView::from_node(n))
+        .collect()
+}
+
 fn add_relation(acc: &mut Vec<(NodeId, Relation)>, id: NodeId, rel: Relation) {
     if let Some(entry) = acc.iter_mut().find(|(eid, _)| *eid == id) {
         if rel.priority() > entry.1.priority() {
@@ -284,6 +318,18 @@ mod tests {
         let tiny = map(&g, 1, &counter);
         assert!(tiny.truncated);
         assert_eq!(tiny.items.len(), 1);
+    }
+
+    #[test]
+    fn test_search_by_substring() {
+        let g = sample_graph();
+
+        let hits = search(&g, "al", 10);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].fqn, "alpha");
+
+        let hits2 = search(&g, "gamma", 10);
+        assert_eq!(hits2[0].fqn, "gamma");
     }
 
     #[test]
