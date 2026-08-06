@@ -105,6 +105,38 @@ pub struct QueryResult {
     pub note: Option<String>,
 }
 
+impl QueryResult {
+    /// Render the bundle as compact newline-delimited text for agents / MCP.
+    pub fn to_text(&self) -> String {
+        let mut out = String::new();
+        if let Some(note) = &self.note {
+            out.push_str(note);
+            out.push('\n');
+        }
+        for item in &self.items {
+            out.push_str(&item.render());
+            out.push('\n');
+        }
+        if self.truncated {
+            out.push_str("... (truncated to fit token budget)\n");
+        }
+        out
+    }
+}
+
+/// Render a list of items (e.g. `search` results) as newline-delimited text.
+pub fn render_items(items: &[ItemView]) -> String {
+    if items.is_empty() {
+        return "(no matches)\n".to_string();
+    }
+    let mut out = String::new();
+    for item in items {
+        out.push_str(&item.render());
+        out.push('\n');
+    }
+    out
+}
+
 fn estimate_full_tokens(views: &[ItemView], counter: &dyn TokenCounter) -> usize {
     let mut files: Vec<&str> = views.iter().map(|v| v.file.as_str()).collect();
     files.sort_unstable();
