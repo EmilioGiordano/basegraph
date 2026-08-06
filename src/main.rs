@@ -76,6 +76,9 @@ enum Command {
         grep: Option<String>,
         #[arg(long)]
         outline: bool,
+        /// Human-readable output: faithful indentation and a line number on every line.
+        #[arg(long)]
+        pretty: bool,
         #[arg(long)]
         cache: Option<PathBuf>,
     },
@@ -165,6 +168,7 @@ fn main() -> Result<()> {
             range,
             grep,
             outline,
+            pretty,
             cache,
         } => {
             let mode = if outline {
@@ -181,7 +185,7 @@ fn main() -> Result<()> {
             };
             let path = cache_path(&dir, cache);
             let graph = JsonCache::new(&path).load().context("loading cache")?;
-            print!("{}", query::show(&graph, &symbol, &mode));
+            print!("{}", query::show(&graph, &symbol, &mode, !pretty));
         }
         Command::Mcp { dir } => {
             codegraph::mcp::serve(dir)?;

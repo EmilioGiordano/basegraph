@@ -249,8 +249,9 @@ pub enum ShowMode {
 const SHOW_CAP: usize = 200;
 
 /// Render the source of each symbol matching `target` (by name or fqn) according
-/// to `mode`, read live from the file by the node's line range.
-pub fn show(graph: &Graph, target: &str, mode: &ShowMode) -> String {
+/// to `mode`. `compact` (default) dedents and drops derivable line numbers;
+/// `!compact` (`--pretty`) keeps faithful indentation and numbers every line.
+pub fn show(graph: &Graph, target: &str, mode: &ShowMode, compact: bool) -> String {
     let matches: Vec<&Node> = graph
         .nodes()
         .iter()
@@ -271,28 +272,36 @@ pub fn show(graph: &Graph, target: &str, mode: &ShowMode) -> String {
             continue;
         };
         let file: Vec<&str> = content.lines().collect();
-        let span = |a: usize, b: usize| -> String {
+        let slice = |a: usize, b: usize| -> Vec<&str> {
             let s = a.saturating_sub(1);
             let e = b.min(file.len());
             if s < e {
-                file[s..e].join("\n")
+                file[s..e].to_vec()
             } else {
-                String::new()
+                Vec::new()
             }
         };
-        let numbered = |a: usize, b: usize| -> String {
-            (a..=b.min(file.len()))
-                .filter_map(|i| file.get(i - 1).map(|l| format!("{i:>5}: {l}")))
-                .collect::<Vec<_>>()
-                .join("\n")
+        // Dedented when compact; numbered with faithful indent when pretty.
+        let render = |a: usize, b: usize| -> String {
+            let lines = slice(a, b);
+            if compact {
+                dedent(&lines)
+            } else {
+                lines
+                    .iter()
+                    .enumerate()
+                    .map(|(i, l)| format!("{:>5}: {l}", a + i))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
         };
         match mode {
-            ShowMode::Full => out.push_str(&span(n.line_start, n.line_end)),
+            ShowMode::Full => out.push_str(&render(n.line_start, n.line_end)),
             ShowMode::Default => {
                 if total <= SHOW_CAP {
-                    out.push_str(&span(n.line_start, n.line_end));
+                    out.push_str(&render(n.line_start, n.line_end));
                 } else {
-                    out.push_str(&span(n.line_start, n.line_start + SHOW_CAP - 1));
+                    out.push_str(&render(n.line_start, n.line_start + SHOW_CAP - 1));
                     out.push_str(&format!(
                         "\n... ({SHOW_CAP} of {total} lines; use --full, --range {}:{}, --grep <text>, or --outline)",
                         n.line_start, n.line_end
@@ -302,11 +311,11 @@ pub fn show(graph: &Graph, target: &str, mode: &ShowMode) -> String {
             ShowMode::Range(a, b) => {
                 let start = (*a).max(n.line_start);
                 let end = b.unwrap_or(n.line_end).min(n.line_end);
-                out.push_str(&numbered(start, end));
+                out.push_str(&render(start, end));
             }
             ShowMode::Grep(pat) => {
                 let needle = pat.to_lowercase();
-                let mut hits = 0;
+                let mut wanted: Vec<usize> = Vec::new();
                 for i in n.line_start..=n.line_end {
                     if file
                         .get(i - 1)
@@ -314,13 +323,34 @@ pub fn show(graph: &Graph, target: &str, mode: &ShowMode) -> String {
                     {
                         let cs = i.saturating_sub(2).max(n.line_start);
                         let ce = (i + 2).min(n.line_end);
-                        out.push_str(&numbered(cs, ce));
-                        out.push_str("\n  --\n");
-                        hits += 1;
+                        wanted.extend(cs..=ce);
                     }
                 }
-                if hits == 0 {
+                if wanted.is_empty() {
                     out.push_str(&format!("(no lines matching '{pat}')"));
+                } else {
+                    wanted.sort_unstable();
+                    wanted.dedup();
+                    let mut segments: Vec<(usize, usize)> = Vec::new();
+                    let (mut seg, mut prev) = (wanted[0], wanted[0]);
+                    for &w in &wanted[1..] {
+                        if w == prev + 1 {
+                            prev = w;
+                        } else {
+                            segments.push((seg, prev));
+                            seg = w;
+                            prev = w;
+                        }
+                    }
+                    segments.push((seg, prev));
+                    for (s, e) in segments {
+                        if compact {
+                            out.push_str(&format!("@ {s}-{e}\n{}\n", dedent(&slice(s, e))));
+                        } else {
+                            out.push_str(&render(s, e));
+                            out.push_str("\n  --\n");
+                        }
+                    }
                 }
             }
             ShowMode::Outline => {
@@ -341,6 +371,22 @@ pub fn show(graph: &Graph, target: &str, mode: &ShowMode) -> String {
         out.push_str("\n\n");
     }
     out
+}
+
+/// Strip the common leading whitespace from `lines` (keeping relative
+/// indentation), joined with newlines.
+fn dedent(lines: &[&str]) -> String {
+    let indent = lines
+        .iter()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| l.len() - l.trim_start().len())
+        .min()
+        .unwrap_or(0);
+    lines
+        .iter()
+        .map(|l| l.get(indent..).unwrap_or(""))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn add_relation(acc: &mut Vec<(NodeId, Relation)>, id: NodeId, rel: Relation) {

@@ -388,7 +388,7 @@ mod tests {
 
         let graph = build_graph(&dir).expect("build failed");
         // Requires the method line range to cover the body, not just the signature.
-        let src = crate::query::show(&graph, "S::compute", &crate::query::ShowMode::Full);
+        let src = crate::query::show(&graph, "S::compute", &crate::query::ShowMode::Full, true);
         assert!(
             src.contains("base + 2"),
             "show should include the method body, got: {src}"
@@ -409,7 +409,7 @@ mod tests {
         .expect("w");
 
         let graph = build_graph(&dir).expect("build failed");
-        let out = crate::query::show(&graph, "dispatch", &crate::query::ShowMode::Outline);
+        let out = crate::query::show(&graph, "dispatch", &crate::query::ShowMode::Outline, true);
         assert!(
             out.contains("match x"),
             "outline should show the match, got: {out}"

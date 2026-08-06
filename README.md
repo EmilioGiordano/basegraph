@@ -35,6 +35,9 @@ codegraph search ./my-project AcpEvent --format text
 
 # 4. Understand a symbol: its callers, callees, impls, and used types
 codegraph context ./my-project start_agent --format text
+
+# 5. Read a symbol's source — whole, a range, matching lines, or an outline
+codegraph show ./my-project start_agent
 ```
 
 Every query command accepts `--format json` (default) or `--format text`, a
@@ -62,6 +65,30 @@ touches. Within a tier, results are ordered by centrality.
 The graph carries three edge kinds: **Calls** (`fn` → `fn`), **Implements**
 (`type` → `trait`), and **Uses** (symbol → the named types in its signature,
 fields, or constructed values).
+
+## Reading source with `show`
+
+`show <symbol>` prints a symbol's source, read live from the file — nothing is
+duplicated in the cache. It takes a name or fully-qualified name and prints each
+match. `context`/`search` already show every symbol's line range (e.g.
+`bridge.rs:328-369`), so you know a symbol's size before reading it. Modes:
+
+| Flag            | What it prints                                                                        |
+| --------------- | ------------------------------------------------------------------------------------- |
+| *(none)*        | a preview capped at 200 lines, with a header stating the total                        |
+| `--full`        | the entire body                                                                       |
+| `--range X:Y`   | absolute file lines `X` to `Y` (`X:` means `X` to the end)                             |
+| `--grep <text>` | only lines matching `<text>` (case-insensitive) with context, grouped into segments   |
+| `--outline`     | a skeleton: the signature plus control-flow headers and match arms                    |
+
+Output is **compact by default** — dedented, with line numbers only where they
+are not derivable: `--range` omits them, `--grep` heads each segment with
+`@ start-end`, and `--outline` keeps them (they are the navigation). Pass
+`--pretty` for human-readable output: faithful indentation and a line number on
+every line.
+
+`--outline` is AST-based, so control flow inside macros (e.g. `tokio::select!`) is
+invisible to it — use `--grep` for those, since it works on text.
 
 ## Ranking
 
