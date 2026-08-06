@@ -188,6 +188,22 @@ impl ServerState {
                         "required": ["query"],
                         "additionalProperties": false
                     }
+                },
+                {
+                    "name": "show",
+                    "description": "Read a symbol's source, live from the file. Default is a preview capped at 200 lines; pass one of full/range/grep/outline to control what you get. Use after `context` to read a body and act on it.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "symbol": { "type": "string", "description": "Symbol name or fully-qualified name" },
+                            "full": { "type": "boolean", "description": "Return the entire body" },
+                            "range": { "type": "string", "description": "Absolute file lines 'X:Y' (or 'X:' to the end)" },
+                            "grep": { "type": "string", "description": "Return only lines matching this substring, with context" },
+                            "outline": { "type": "boolean", "description": "Return a skeleton: signature plus control-flow headers and match arms" }
+                        },
+                        "required": ["symbol"],
+                        "additionalProperties": false
+                    }
                 }
             ]
         })
@@ -245,6 +261,13 @@ impl ServerState {
                     limit,
                 )))
             }
+            "show" => {
+                let symbol = args
+                    .get("symbol")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::BadArg("missing required argument: symbol".into()))?;
+                Ok(query::show(&self.graph, symbol, &show_mode(args), true))
+            }
             other => Err(ToolError::Unknown(other.to_string())),
         }
     }
@@ -275,6 +298,28 @@ fn arg_usize(args: &Value, key: &str, default: usize) -> usize {
         .and_then(Value::as_u64)
         .map(|n| n as usize)
         .unwrap_or(default)
+}
+
+fn show_mode(args: &Value) -> query::ShowMode {
+    if args
+        .get("outline")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        query::ShowMode::Outline
+    } else if let Some(pattern) = args.get("grep").and_then(Value::as_str) {
+        query::ShowMode::Grep(pattern.to_string())
+    } else if let Some(r) = args.get("range").and_then(Value::as_str) {
+        let (a, b) = r.split_once(':').unwrap_or((r, ""));
+        match a.trim().parse::<usize>() {
+            Ok(start) => query::ShowMode::Range(start, b.trim().parse().ok()),
+            Err(_) => query::ShowMode::Default,
+        }
+    } else if args.get("full").and_then(Value::as_bool).unwrap_or(false) {
+        query::ShowMode::Full
+    } else {
+        query::ShowMode::Default
+    }
 }
 
 fn file_mtime(path: &Path) -> Option<SystemTime> {
@@ -336,7 +381,7 @@ mod tests {
             .handle(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
             .expect("response");
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
     }
 
     #[test]
