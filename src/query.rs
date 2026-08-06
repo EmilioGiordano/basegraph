@@ -22,14 +22,17 @@ pub enum Relation {
     Callee,
     Implements,
     Implementor,
+    Uses,
+    UsedBy,
     Colocated,
 }
 
 impl Relation {
     fn priority(self) -> u8 {
         match self {
-            Relation::Target => 3,
-            Relation::Caller | Relation::Callee | Relation::Implements | Relation::Implementor => 2,
+            Relation::Target => 4,
+            Relation::Caller | Relation::Callee | Relation::Implements | Relation::Implementor => 3,
+            Relation::Uses | Relation::UsedBy => 2,
             Relation::Colocated => 1,
         }
     }
@@ -41,6 +44,8 @@ impl Relation {
             Relation::Callee => "callee",
             Relation::Implements => "implements",
             Relation::Implementor => "implementor",
+            Relation::Uses => "uses",
+            Relation::UsedBy => "used-by",
             Relation::Colocated => "co-located",
         }
     }
@@ -237,6 +242,12 @@ pub fn context(
         for implementor in graph.in_edges(m.id, EdgeKind::Implements) {
             add_relation(&mut relations, implementor, Relation::Implementor);
         }
+        for used in graph.out_edges(m.id, EdgeKind::Uses) {
+            add_relation(&mut relations, used, Relation::Uses);
+        }
+        for user in graph.in_edges(m.id, EdgeKind::Uses) {
+            add_relation(&mut relations, user, Relation::UsedBy);
+        }
     }
     let match_files: Vec<String> = matches.iter().map(|m| m.file.clone()).collect();
     for node in graph.nodes() {
@@ -347,6 +358,36 @@ mod tests {
         let res = context(&g, "does_not_exist", 100_000, &counter);
         assert!(res.items.is_empty());
         assert!(res.note.is_some());
+    }
+
+    #[test]
+    fn test_context_uses_labels() {
+        let mut g = Graph::new();
+        g.add_node(node(0, "MyType", "a.rs", 1));
+        g.add_node(node(1, "user_fn", "b.rs", 1));
+        g.add_edge(Edge {
+            src: NodeId(1),
+            dst: NodeId(0),
+            kind: EdgeKind::Uses,
+            confidence: Confidence::Heuristic,
+        });
+        let counter = HeuristicCounter;
+
+        let res = context(&g, "MyType", 100_000, &counter);
+        let user = res
+            .items
+            .iter()
+            .find(|i| i.fqn == "user_fn")
+            .expect("user present");
+        assert_eq!(user.relation, Some(Relation::UsedBy));
+
+        let res2 = context(&g, "user_fn", 100_000, &counter);
+        let ty = res2
+            .items
+            .iter()
+            .find(|i| i.fqn == "MyType")
+            .expect("type present");
+        assert_eq!(ty.relation, Some(Relation::Uses));
     }
 
     #[test]
