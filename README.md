@@ -43,6 +43,25 @@ codegraph show ./my-project start_agent
 Every query command accepts `--format json` (default) or `--format text`, a
 `--budget` (map/context) or `--limit` (search), and an optional `--cache <path>`.
 
+## Commands
+
+The intended flow: **build** once to index, **map** to orient, **search** to find a
+symbol's name, **context** to understand its relationships and change impact, **show**
+to read the code and act — and **mcp** to expose all of it to an agent.
+
+| Command             | What it does                                                                                          | Key flags                              |
+| ------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `build <dir>`       | Index the codebase → writes `<dir>/codegraph.json` (with PageRank precomputed)                        | `--cache`                              |
+| `map <dir>`         | Project map ranked by centrality, capped at a token budget                                            | `--budget`, `--format`                 |
+| `search <dir> <q>`  | Find symbols by name / fqn, ranked by relevance and centrality                                        | `--limit`, `--format`                  |
+| `context <dir> <s>` | A symbol's neighborhood, each line labeled: caller/callee/implements/implementor/uses/used-by/co-located | `--budget`, `--format`              |
+| `show <dir> <s>`    | Read a symbol's source live from the file                                                             | `--full`, `--range`, `--grep`, `--outline`, `--pretty` |
+| `mcp <dir>`         | MCP server over stdio, exposing map/context/search to any MCP client                                  | —                                      |
+
+All commands accept `--cache <path>` (default `<dir>/codegraph.json`); query commands
+accept `--format json|text`. See [Reading source with `show`](#reading-source-with-show)
+for `show`'s modes.
+
 ## The output model
 
 `context` labels every symbol by how it relates to the one you asked about:
