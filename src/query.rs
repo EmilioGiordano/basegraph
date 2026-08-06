@@ -2,9 +2,16 @@
 
 use serde::Serialize;
 
+use std::collections::HashMap;
+
 use crate::graph::Graph;
 use crate::model::{Node, NodeId, NodeKind};
+use crate::rank;
 use crate::tokens::TokenCounter;
+
+fn rank_of(ranks: &HashMap<NodeId, f64>, id: NodeId) -> f64 {
+    ranks.get(&id).copied().unwrap_or(0.0)
+}
 
 /// How a symbol in a context bundle relates to the queried target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -138,8 +145,15 @@ fn assemble(views: Vec<ItemView>, budget: usize, counter: &dyn TokenCounter) -> 
 }
 
 pub fn map(graph: &Graph, budget: usize, counter: &dyn TokenCounter) -> QueryResult {
-    let mut views: Vec<ItemView> = graph.nodes().iter().map(ItemView::from_node).collect();
-    views.sort_by(|a, b| a.file.cmp(&b.file).then(a.line_start.cmp(&b.line_start)));
+    let ranks = rank::pagerank(graph);
+    let mut nodes: Vec<&Node> = graph.nodes().iter().collect();
+    nodes.sort_by(|a, b| {
+        rank_of(&ranks, b.id)
+            .partial_cmp(&rank_of(&ranks, a.id))
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.file.cmp(&b.file).then(a.line_start.cmp(&b.line_start)))
+    });
+    let views: Vec<ItemView> = nodes.into_iter().map(ItemView::from_node).collect();
     assemble(views, budget, counter)
 }
 
@@ -184,13 +198,19 @@ pub fn context(
         }
     }
 
+    let ranks = rank::pagerank(graph);
     relations.sort_by(|a, b| {
-        b.1.priority().cmp(&a.1.priority()).then_with(|| {
-            match (graph.node_by_id(a.0), graph.node_by_id(b.0)) {
+        b.1.priority()
+            .cmp(&a.1.priority())
+            .then_with(|| {
+                rank_of(&ranks, b.0)
+                    .partial_cmp(&rank_of(&ranks, a.0))
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .then_with(|| match (graph.node_by_id(a.0), graph.node_by_id(b.0)) {
                 (Some(x), Some(y)) => x.file.cmp(&y.file).then(x.line_start.cmp(&y.line_start)),
                 _ => std::cmp::Ordering::Equal,
-            }
-        })
+            })
     });
 
     let views: Vec<ItemView> = relations
