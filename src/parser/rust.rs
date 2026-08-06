@@ -101,16 +101,24 @@ impl super::LanguageParser for RustParser {
                 }
                 Item::Trait(item_trait) => {
                     let name = item_trait.ident.to_string();
+                    let doc = Self::extract_docs(&item_trait.attrs);
+                    let mut decl = item_trait.clone();
+                    decl.attrs.clear();
+                    for trait_item in &mut decl.items {
+                        if let syn::TraitItem::Fn(f) = trait_item {
+                            f.default = None;
+                        }
+                    }
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Trait,
-                        signature: format!("trait {name}"),
+                        signature: format!("{}", quote! { #decl }),
                         fqn: name.clone(),
                         name,
                         file: file.to_string(),
                         line_start: item_trait.span().start().line,
                         line_end: item_trait.span().end().line,
-                        doc: Self::extract_docs(&item_trait.attrs),
+                        doc,
                     });
                     id_counter += 1;
                 }
@@ -295,6 +303,7 @@ mod tests {
             .find(|n| n.kind == NodeKind::Trait)
             .expect("trait node");
         assert_eq!(tr.name, "MyTrait");
+        assert!(tr.signature.contains("trait_method"));
 
         let md = nodes
             .iter()
