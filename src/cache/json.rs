@@ -18,7 +18,7 @@ impl JsonCache {
 }
 
 /// Current on-disk cache format version. Bump when the graph schema changes.
-const CURRENT_VERSION: u32 = 2;
+const CURRENT_VERSION: u32 = 3;
 
 #[derive(serde::Serialize)]
 struct CacheEnvelopeRef<'a> {
@@ -106,6 +106,25 @@ mod tests {
             .load()
             .expect_err("should reject old format");
         assert!(matches!(err, CacheError::Incompatible { .. }));
+
+        std::fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_rejects_previous_version() {
+        let path = std::env::temp_dir().join("codegraph_cache_prev_version_test.json");
+        std::fs::write(&path, r#"{"version":2,"graph":{"nodes":[],"edges":[]}}"#).expect("write");
+
+        let err = JsonCache::new(&path)
+            .load()
+            .expect_err("should reject previous version");
+        assert!(matches!(
+            err,
+            CacheError::Incompatible {
+                found: 2,
+                expected: 3
+            }
+        ));
 
         std::fs::remove_file(&path).ok();
     }
