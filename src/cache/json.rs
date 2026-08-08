@@ -73,6 +73,7 @@ mod tests {
             name: "foo".into(),
             fqn: "foo".into(),
             signature: String::new(),
+            sig_hash: String::new(),
             file: "src/foo.rs".into(),
             line_start: 1,
             line_end: 1,

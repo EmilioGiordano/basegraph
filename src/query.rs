@@ -488,6 +488,7 @@ mod tests {
             name: name.into(),
             fqn: name.into(),
             signature: format!("fn {name}()"),
+            sig_hash: String::new(),
             file: file.into(),
             line_start: line,
             line_end: line + 2,

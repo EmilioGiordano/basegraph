@@ -116,6 +116,7 @@ mod tests {
             name: name.into(),
             fqn: name.into(),
             signature: String::new(),
+            sig_hash: String::new(),
             file: "src/lib.rs".into(),
             line_start: 1,
             line_end: 1,

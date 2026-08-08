@@ -2,6 +2,7 @@
 //!
 //! Extracts top-level symbols from Rust source code using the `syn` crate.
 
+use super::sig;
 use crate::model::{Node, NodeId, NodeKind};
 use quote::quote;
 use syn::spanned::Spanned;
@@ -50,12 +51,14 @@ impl super::LanguageParser for RustParser {
                     let sig = &item_fn.sig;
                     let signature = format!("{}", quote! { #sig });
                     let name = item_fn.sig.ident.to_string();
+                    let sig_hash = sig::sig_hash(&name, &signature);
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Function,
                         fqn: name.clone(),
                         name,
                         signature,
+                        sig_hash,
                         file: file.to_string(),
                         line_start: item_fn.span().start().line,
                         line_end: item_fn.span().end().line,
@@ -71,10 +74,13 @@ impl super::LanguageParser for RustParser {
                     for field in decl.fields.iter_mut() {
                         field.attrs.clear();
                     }
+                    let signature = format!("{}", quote! { #decl });
+                    let sig_hash = sig::sig_hash(&name, &signature);
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Struct,
-                        signature: format!("{}", quote! { #decl }),
+                        signature,
+                        sig_hash,
                         fqn: name.clone(),
                         name,
                         file: file.to_string(),
@@ -95,10 +101,13 @@ impl super::LanguageParser for RustParser {
                             field.attrs.clear();
                         }
                     }
+                    let signature = format!("{}", quote! { #decl });
+                    let sig_hash = sig::sig_hash(&name, &signature);
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Enum,
-                        signature: format!("{}", quote! { #decl }),
+                        signature,
+                        sig_hash,
                         fqn: name.clone(),
                         name,
                         file: file.to_string(),
@@ -124,10 +133,13 @@ impl super::LanguageParser for RustParser {
                             _ => {}
                         }
                     }
+                    let signature = format!("{}", quote! { #decl });
+                    let sig_hash = sig::sig_hash(&name, &signature);
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Trait,
-                        signature: format!("{}", quote! { #decl }),
+                        signature,
+                        sig_hash,
                         fqn: name.clone(),
                         name,
                         file: file.to_string(),
@@ -139,10 +151,13 @@ impl super::LanguageParser for RustParser {
                 }
                 Item::Mod(item_mod) => {
                     let name = item_mod.ident.to_string();
+                    let signature = format!("mod {name}");
+                    let sig_hash = sig::sig_hash(&name, &signature);
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Module,
-                        signature: format!("mod {name}"),
+                        signature,
+                        sig_hash,
                         fqn: name.clone(),
                         name,
                         file: file.to_string(),
@@ -154,10 +169,13 @@ impl super::LanguageParser for RustParser {
                 }
                 Item::Const(item_const) => {
                     let name = item_const.ident.to_string();
+                    let signature = format!("const {name}");
+                    let sig_hash = sig::sig_hash(&name, &signature);
                     nodes.push(Node {
                         id: NodeId(id_counter),
                         kind: NodeKind::Const,
-                        signature: format!("const {name}"),
+                        signature,
+                        sig_hash,
                         fqn: name.clone(),
                         name,
                         file: file.to_string(),
@@ -175,6 +193,7 @@ impl super::LanguageParser for RustParser {
                             let sig = &method.sig;
                             let signature = format!("{}", quote! { #sig });
                             let name = sig.ident.to_string();
+                            let sig_hash = sig::sig_hash(&name, &signature);
                             // Full method span (signature + body) so `show` can read the body.
                             let span = method.span();
                             nodes.push(Node {
@@ -183,6 +202,7 @@ impl super::LanguageParser for RustParser {
                                 fqn: format!("{self_ty_str}::{name}"),
                                 name,
                                 signature,
+                                sig_hash,
                                 file: file.to_string(),
                                 line_start: span.start().line,
                                 line_end: span.end().line,
@@ -650,5 +670,37 @@ mod tests {
         let parser = RustParser;
         let res = parser.parse_source("fn bad {", "bad.rs");
         assert!(res.is_err());
+    }
+
+    fn parse_one(source: &str) -> Vec<Node> {
+        RustParser.parse_source(source, "t.rs").expect("parse")
+    }
+
+    #[test]
+    fn body_change_does_not_affect_sig_hash() {
+        let a = parse_one("fn f(x: i32) -> i32 { x }");
+        let b = parse_one("fn f(x: i32) -> i32 { x + 1 }");
+        assert_eq!(a[0].sig_hash, b[0].sig_hash);
+    }
+
+    #[test]
+    fn formatting_differences_produce_equal_sig_hash() {
+        let a = parse_one("fn f(x:i32)->i32{x}");
+        let b = parse_one("fn   f( x : i32 ) -> i32 {\n    x\n}");
+        assert_eq!(a[0].sig_hash, b[0].sig_hash);
+    }
+
+    #[test]
+    fn changed_return_type_produces_different_sig_hash() {
+        let a = parse_one("fn f(x: i32) -> i32 { 0 }");
+        let b = parse_one("fn f(x: i32) -> u64 { 0 }");
+        assert_ne!(a[0].sig_hash, b[0].sig_hash);
+    }
+
+    #[test]
+    fn trait_default_body_change_keeps_sig_hash() {
+        let a = parse_one("trait T { fn m(&self) -> i32 { 1 } }");
+        let b = parse_one("trait T { fn m(&self) -> i32 { 2 } }");
+        assert_eq!(a[0].sig_hash, b[0].sig_hash);
     }
 }

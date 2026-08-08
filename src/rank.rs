@@ -59,6 +59,7 @@ mod tests {
             name: format!("f{id}"),
             fqn: format!("f{id}"),
             signature: String::new(),
+            sig_hash: String::new(),
             file: "x.rs".into(),
             line_start: id as usize,
             line_end: id as usize,
