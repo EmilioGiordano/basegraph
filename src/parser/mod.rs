@@ -1,6 +1,7 @@
 //! Parser module for CodeGraph
 
 pub mod rust;
+pub mod sig;
 
 use thiserror::Error;
 
