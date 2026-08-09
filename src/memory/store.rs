@@ -4,6 +4,7 @@
 //! fold of the log in order. This log's version is independent of the graph
 //! cache version.
 
+use std::collections::HashMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -106,34 +107,42 @@ impl MemoryStore {
 }
 
 /// Fold events into the current set of memories, preserving creation order.
-/// Events that reference an unknown id are ignored.
+/// An id index keeps this O(events); superseded slots are tombstoned and
+/// compacted out at the end. Events referencing an unknown id are ignored.
 fn fold(events: Vec<Event>) -> Vec<Memory> {
-    let mut memories: Vec<Memory> = Vec::new();
+    let mut slots: Vec<Option<Memory>> = Vec::new();
+    let mut index: HashMap<MemoryId, usize> = HashMap::new();
     for event in events {
         match event {
-            Event::Created { memory } => {
-                if let Some(existing) = memories.iter_mut().find(|m| m.id == memory.id) {
-                    *existing = memory;
-                } else {
-                    memories.push(memory);
+            Event::Created { memory } => match index.get(&memory.id) {
+                Some(&i) => slots[i] = Some(memory),
+                None => {
+                    index.insert(memory.id.clone(), slots.len());
+                    slots.push(Some(memory));
                 }
-            }
+            },
             Event::Reanchored { id, anchor } => {
-                if let Some(m) = memories.iter_mut().find(|m| m.id == id) {
-                    m.anchor = anchor;
+                if let Some(&i) = index.get(&id) {
+                    if let Some(m) = &mut slots[i] {
+                        m.anchor = anchor;
+                    }
                 }
             }
             Event::StatusChanged { id, status } => {
-                if let Some(m) = memories.iter_mut().find(|m| m.id == id) {
-                    m.status = status;
+                if let Some(&i) = index.get(&id) {
+                    if let Some(m) = &mut slots[i] {
+                        m.status = status;
+                    }
                 }
             }
             Event::Superseded { id } => {
-                memories.retain(|m| m.id != id);
+                if let Some(i) = index.remove(&id) {
+                    slots[i] = None;
+                }
             }
         }
     }
-    memories
+    slots.into_iter().flatten().collect()
 }
 
 #[cfg(test)]
