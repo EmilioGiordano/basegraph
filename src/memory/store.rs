@@ -43,7 +43,8 @@ pub enum StoreError {
     Incompatible { found: u32, expected: u32 },
 }
 
-/// Append-only store of memory events backed by a JSONL file.
+/// Append-only store of memory events backed by a JSONL file. Assumes a single
+/// writer: `append` is a plain file append, not locked or atomic.
 pub struct MemoryStore {
     path: PathBuf,
 }
