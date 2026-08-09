@@ -32,6 +32,29 @@ pub fn sig_hash(name: &str, signature: &str) -> String {
     format!("{:016x}", fnv1a(&normalized))
 }
 
+/// Name-free hash of a symbol's shape: its normalized signature with the item's
+/// own name token removed, so a pure rename (name changes, everything else
+/// identical) maps to the same value. The signature string embeds the name
+/// (e.g. `fn compute(...)`), so the name must be stripped, not merely left
+/// un-prepended. 16 lowercase hex chars.
+pub fn shape_hash(name: &str, signature: &str) -> String {
+    let normalized = normalize(signature);
+    let mut removed = false;
+    let shape = normalized
+        .split(' ')
+        .filter(|tok| {
+            if !removed && *tok == name {
+                removed = true;
+                false
+            } else {
+                true
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!("{:016x}", fnv1a(&shape))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -81,5 +104,36 @@ mod tests {
         let h = sig_hash("f", "fn f ()");
         assert_eq!(h.len(), 16);
         assert!(h.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn shape_hash_ignores_the_name() {
+        // A pure rename keeps the same shape.
+        let a = shape_hash("compute", "fn compute (x : i32) -> i32");
+        let b = shape_hash("evaluate", "fn evaluate (x : i32) -> i32");
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn shape_hash_differs_on_shape_change() {
+        let a = shape_hash("f", "fn f (x : i32) -> i32");
+        let b = shape_hash("f", "fn f (x : u64) -> i32");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn shape_hash_strips_name_as_a_token_not_a_substring() {
+        // `n` is a substring of the `fn` keyword; token equality must not touch
+        // it. A substring `replacen` would mangle the keyword and fail this.
+        assert_eq!(shape_hash("n", "fn n ()"), shape_hash("m", "fn m ()"));
+        assert_eq!(
+            shape_hash("S", "struct S (i32) ;"),
+            shape_hash("T", "struct T (i32) ;")
+        );
+    }
+
+    #[test]
+    fn shape_hash_differs_from_sig_hash() {
+        assert_ne!(shape_hash("f", "fn f ()"), sig_hash("f", "fn f ()"));
     }
 }

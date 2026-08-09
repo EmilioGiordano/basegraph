@@ -268,6 +268,7 @@ fn status_label(classification: &Classification) -> &'static str {
 fn basis_label(basis: &ReanchorBasis) -> &'static str {
     match basis {
         ReanchorBasis::SigHash => "same signature hash",
+        ReanchorBasis::ShapeHash => "same signature shape (renamed)",
         ReanchorBasis::TokenSimilarity => "similar name",
     }
 }

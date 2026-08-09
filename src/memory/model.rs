@@ -16,6 +16,11 @@ pub struct MemoryId(pub String);
 pub struct AnchorKey {
     pub fqn: String,
     pub sig_hash: String,
+    /// Name-free hash of the signature, enabling rename detection. Defaulted so
+    /// memories written before this field still load (they miss rename
+    /// detection, and an empty value never matches — see the classifier).
+    #[serde(default)]
+    pub shape_hash: String,
 }
 
 /// What kind of knowledge a memory captures.
@@ -73,6 +78,7 @@ mod tests {
             anchor: AnchorKey {
                 fqn: "graph::Graph::neighbors".into(),
                 sig_hash: "b4d44c6b030939fa".into(),
+                shape_hash: "a1b2c3d4e5f60718".into(),
             },
             scope: Scope::Symbol("graph::Graph::neighbors".into()),
             kind: Kind::Invariant,

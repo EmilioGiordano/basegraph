@@ -168,6 +168,7 @@ mod tests {
             anchor: AnchorKey {
                 fqn: fqn.into(),
                 sig_hash: sig_hash.into(),
+                shape_hash: String::new(),
             },
             scope: Scope::Symbol(fqn.into()),
             kind: Kind::Decision,
@@ -237,6 +238,7 @@ mod tests {
                 anchor: AnchorKey {
                     fqn: "b::f".into(),
                     sig_hash: "h1".into(),
+                    shape_hash: String::new(),
                 },
             })
             .expect("reanchor");

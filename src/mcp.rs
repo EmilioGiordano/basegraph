@@ -16,6 +16,7 @@ use crate::graph::Graph;
 use crate::memory::anchor::{classify, Classification, ReanchorBasis};
 use crate::memory::model::{AnchorKey, Kind, Memory, MemoryId, Provenance, Scope, Status};
 use crate::memory::store::{Event, MemoryStore};
+use crate::parser::sig;
 use crate::query;
 use crate::tokens::HeuristicCounter;
 
@@ -348,6 +349,7 @@ impl ServerState {
                 let anchor = AnchorKey {
                     fqn: node.fqn.clone(),
                     sig_hash: node.sig_hash.clone(),
+                    shape_hash: sig::shape_hash(&node.name, &node.signature),
                 };
                 let count = self
                     .memory_store
@@ -446,6 +448,7 @@ fn status_label(classification: &Classification) -> &'static str {
 fn basis_label(basis: &ReanchorBasis) -> &'static str {
     match basis {
         ReanchorBasis::SigHash => "same signature hash",
+        ReanchorBasis::ShapeHash => "same signature shape (renamed)",
         ReanchorBasis::TokenSimilarity => "similar name",
     }
 }
@@ -677,6 +680,7 @@ mod tests {
                     anchor: AnchorKey {
                         fqn: "foo".into(),
                         sig_hash: "aaaabbbbccccdddd".into(),
+                        shape_hash: String::new(),
                     },
                     scope: Scope::Symbol("foo".into()),
                     kind: Kind::Invariant,

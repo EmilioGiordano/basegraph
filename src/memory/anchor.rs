@@ -10,12 +10,15 @@ use serde::Serialize;
 
 use crate::graph::Graph;
 use crate::memory::model::{AnchorKey, Status};
+use crate::parser::sig;
 
 /// How a re-anchor candidate was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum ReanchorBasis {
     /// A node elsewhere carries the anchor's exact signature hash.
     SigHash,
+    /// A node carries the anchor's name-free signature hash (likely a rename).
+    ShapeHash,
     /// A node's fqn is textually similar to the anchor's.
     TokenSimilarity,
 }
@@ -78,6 +81,24 @@ pub fn classify(anchor: &AnchorKey, graph: &Graph) -> Classification {
             return Classification::ReanchorCandidate {
                 candidates: by_hash,
                 basis: ReanchorBasis::SigHash,
+            };
+        }
+    }
+
+    // Still nothing: look for a pure rename by the name-free shape hash. Never
+    // match an empty shape hash (memories written before this field default to
+    // empty and must not match each other or shape-less nodes).
+    if !anchor.shape_hash.is_empty() {
+        let by_shape: Vec<String> = graph
+            .nodes()
+            .iter()
+            .filter(|n| sig::shape_hash(&n.name, &n.signature) == anchor.shape_hash)
+            .map(|n| n.fqn.clone())
+            .collect();
+        if !by_shape.is_empty() {
+            return Classification::ReanchorCandidate {
+                candidates: by_shape,
+                basis: ReanchorBasis::ShapeHash,
             };
         }
     }
@@ -166,6 +187,7 @@ mod tests {
         AnchorKey {
             fqn: node.fqn.clone(),
             sig_hash: node.sig_hash.clone(),
+            shape_hash: sig::shape_hash(&node.name, &node.signature),
         }
     }
 
@@ -178,13 +200,46 @@ mod tests {
     }
 
     #[test]
-    fn scenario_rename_is_orphaned() {
+    fn scenario_rename_is_uncertain_reanchor() {
+        // A pure rename changes the name-bearing sig_hash, but the name-free
+        // shape hash still matches, so it is an uncertain proposal, not Orphaned.
         let (_b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
         let (_a, after) = build(&[("a.rs", "pub fn evaluate(x: i32) -> i32 { x }")]);
         let anchor = anchor_for(&before, "compute");
         let c = classify(&anchor, &after);
-        assert_eq!(c, Classification::Orphaned);
-        assert_eq!(c.status(), Status::Orphaned);
+        assert_eq!(
+            c,
+            Classification::ReanchorCandidate {
+                candidates: vec!["evaluate".to_string()],
+                basis: ReanchorBasis::ShapeHash,
+            }
+        );
+        assert!(c.is_uncertain());
+        assert_ne!(c.status(), Status::Intact);
+    }
+
+    #[test]
+    fn scenario_rename_with_shared_shape_is_ambiguous() {
+        // Two functions share the shape, so a rename yields multiple candidates:
+        // uncertain, never a confident Intact.
+        let (_b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
+        let (_a, after) = build(&[(
+            "a.rs",
+            "pub fn evaluate(x: i32) -> i32 { x }\npub fn assess(x: i32) -> i32 { x }",
+        )]);
+        let anchor = anchor_for(&before, "compute");
+        let c = classify(&anchor, &after);
+        match &c {
+            Classification::ReanchorCandidate { candidates, basis } => {
+                assert_eq!(*basis, ReanchorBasis::ShapeHash);
+                assert_eq!(candidates.len(), 2);
+                assert!(candidates.contains(&"evaluate".to_string()));
+                assert!(candidates.contains(&"assess".to_string()));
+            }
+            other => panic!("expected an uncertain re-anchor proposal, got {other:?}"),
+        }
+        assert!(c.is_uncertain());
+        assert_ne!(c.status(), Status::Intact);
     }
 
     #[test]
@@ -226,9 +281,27 @@ mod tests {
 
     #[test]
     fn scenario_deletion_is_orphaned() {
-        let (_b, before) = build(&[("a.rs", "pub fn obsolete() {}\npub fn other() {}")]);
+        // The deleted symbol has a distinctive shape, so nothing shape-matches
+        // it (a trivially-shaped `fn ()` would instead surface as a candidate).
+        let (_b, before) = build(&[(
+            "a.rs",
+            "pub fn obsolete(token: String) -> Vec<u8> { vec![] }\npub fn other() {}",
+        )]);
         let (_a, after) = build(&[("a.rs", "pub fn other() {}")]);
         let anchor = anchor_for(&before, "obsolete");
+        assert_eq!(classify(&anchor, &after), Classification::Orphaned);
+    }
+
+    #[test]
+    fn empty_shape_hash_never_matches() {
+        // A memory written before shape_hash existed defaults to empty; it must
+        // never shape-match a node.
+        let (_a, after) = build(&[("a.rs", "pub fn something() {}")]);
+        let anchor = AnchorKey {
+            fqn: "vanished".to_string(),
+            sig_hash: "nomatch0000000000".to_string(),
+            shape_hash: String::new(),
+        };
         assert_eq!(classify(&anchor, &after), Classification::Orphaned);
     }
 
@@ -264,15 +337,15 @@ mod tests {
 
     #[test]
     fn token_similarity_fallback_is_uncertain() {
-        // Renamed within a type: hash changes, but the fqn tokens overlap enough
-        // to propose a re-anchor — still uncertain, never Intact.
+        // Renamed AND reshaped: neither sig_hash nor shape_hash matches, but the
+        // fqn tokens overlap enough to propose a re-anchor — still uncertain.
         let (_b, before) = build(&[(
             "a.rs",
             "struct Foo; impl Foo { pub fn compute_total(&self) -> i32 { 0 } }",
         )]);
         let (_a, after) = build(&[(
             "a.rs",
-            "struct Foo; impl Foo { pub fn compute_total_sum(&self) -> i32 { 0 } }",
+            "struct Foo; impl Foo { pub fn compute_total_sum(&self, extra: i32) -> i64 { 0 } }",
         )]);
         let anchor = anchor_for(&before, "Foo::compute_total");
         let c = classify(&anchor, &after);
@@ -313,7 +386,7 @@ mod tests {
         )]);
         let (_a3, after3) = build(&[(
             "a.rs",
-            "struct Foo; impl Foo { pub fn load_user_info(&self) {} }",
+            "struct Foo; impl Foo { pub fn load_user_info(&self, id: u64) {} }",
         )]);
 
         let cases = [
