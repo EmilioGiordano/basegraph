@@ -7,6 +7,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use codegraph::builder::build_graph;
 use codegraph::cache::{Cache, JsonCache};
+use codegraph::graph::Graph;
+use codegraph::memory::anchor::{classify, Classification, ReanchorBasis};
+use codegraph::memory::model::{Memory, Scope};
+use codegraph::memory::store::MemoryStore;
 use codegraph::query::{self, ItemView, QueryResult};
 use codegraph::tokens::HeuristicCounter;
 
@@ -79,6 +83,16 @@ enum Command {
         /// Human-readable output: faithful indentation and a line number on every line.
         #[arg(long)]
         pretty: bool,
+        #[arg(long)]
+        cache: Option<PathBuf>,
+    },
+    /// Report stored memories with their anchor status against the current index.
+    Memory {
+        dir: PathBuf,
+        /// Reference commit the current index corresponds to (informational;
+        /// passed in, never read from git).
+        #[arg(long)]
+        commit: Option<String>,
         #[arg(long)]
         cache: Option<PathBuf>,
     },
@@ -187,11 +201,75 @@ fn main() -> Result<()> {
             let graph = JsonCache::new(&path).load().context("loading cache")?;
             print!("{}", query::show(&graph, &symbol, &mode, !pretty));
         }
+        Command::Memory { dir, commit, cache } => {
+            let path = cache_path(&dir, cache);
+            let graph = JsonCache::new(&path).load().context("loading cache")?;
+            let store = MemoryStore::new(&dir);
+            let memories = store.materialize().context("loading memory log")?;
+            print_memory_report(&memories, &graph, commit.as_deref());
+        }
         Command::Mcp { dir } => {
             codegraph::mcp::serve(dir)?;
         }
     }
     Ok(())
+}
+
+fn print_memory_report(memories: &[Memory], graph: &Graph, reference_commit: Option<&str>) {
+    match reference_commit {
+        Some(c) => println!("Memory report: {} memory(ies) @ {c}", memories.len()),
+        None => println!("Memory report: {} memory(ies)", memories.len()),
+    }
+    if memories.is_empty() {
+        println!("(no memories)");
+        return;
+    }
+    for m in memories {
+        let classification = classify(&m.anchor, graph);
+        let scope = match &m.scope {
+            Scope::File(p) => format!("file {p}"),
+            Scope::Symbol(s) => format!("symbol {s}"),
+        };
+        println!(
+            "- {} [{:?}] {} ({scope})",
+            m.id.0,
+            m.kind,
+            status_label(&classification)
+        );
+        println!("    {}", m.content);
+        println!("    anchor: {} @ {}", m.anchor.fqn, m.anchor.sig_hash);
+        if let Classification::ReanchorCandidate { candidates, basis } = &classification {
+            println!(
+                "    re-anchor candidates (UNCERTAIN, {}): {}",
+                basis_label(basis),
+                candidates.join(", ")
+            );
+        }
+        let prov = &m.provenance;
+        if prov.commit.is_some() || prov.session.is_some() {
+            println!(
+                "    provenance: commit={} session={}",
+                prov.commit.as_deref().unwrap_or("-"),
+                prov.session.as_deref().unwrap_or("-")
+            );
+        }
+    }
+}
+
+fn status_label(classification: &Classification) -> &'static str {
+    match classification {
+        Classification::Intact => "intact",
+        Classification::Evolved => "evolved",
+        Classification::ReanchorCandidate { .. } => "orphaned (uncertain re-anchor)",
+        Classification::Orphaned => "orphaned",
+    }
+}
+
+fn basis_label(basis: &ReanchorBasis) -> &'static str {
+    match basis {
+        ReanchorBasis::SigHash => "same signature hash",
+        ReanchorBasis::TokenSimilarity => "similar name",
+    }
 }
 
 fn print_items(items: &[ItemView], format: Format) -> Result<()> {
