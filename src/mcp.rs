@@ -14,8 +14,8 @@ use crate::builder::build_graph;
 use crate::cache::{Cache, JsonCache};
 use crate::graph::Graph;
 use crate::memory::anchor::{classify, Classification, ReanchorBasis};
-use crate::memory::model::{Memory, Scope};
-use crate::memory::store::MemoryStore;
+use crate::memory::model::{AnchorKey, Kind, Memory, MemoryId, Provenance, Scope, Status};
+use crate::memory::store::{Event, MemoryStore};
 use crate::query;
 use crate::tokens::HeuristicCounter;
 
@@ -149,7 +149,7 @@ impl ServerState {
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "codegraph", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source. Use `recall` to fetch what's known about a file or symbol — each memory is tagged with how fresh its anchor is against the current code."
+                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source. Use `recall` to fetch what's known about a file or symbol — each memory is tagged with how fresh its anchor is against the current code — and `remember` to record a decision, gotcha, invariant, or past bug anchored to a symbol."
             }),
         )
     }
@@ -219,6 +219,22 @@ impl ServerState {
                             "target": { "type": "string", "description": "A file path or a symbol's fully-qualified name" }
                         },
                         "required": ["target"],
+                        "additionalProperties": false
+                    }
+                },
+                {
+                    "name": "remember",
+                    "description": "Record a memory (decision, gotcha, invariant, or past bug) anchored to a symbol. The anchor must be an existing symbol's fully-qualified name; its current signature is snapshotted so later recalls can tell whether the code has since changed.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "anchor": { "type": "string", "description": "Fully-qualified name of an existing symbol to anchor to" },
+                            "kind": { "type": "string", "description": "One of: decision, gotcha, invariant, bughistory" },
+                            "content": { "type": "string", "description": "The knowledge to store" },
+                            "commit": { "type": "string", "description": "Optional provenance: commit this was learned at" },
+                            "session": { "type": "string", "description": "Optional provenance: session id" }
+                        },
+                        "required": ["anchor", "kind", "content"],
                         "additionalProperties": false
                     }
                 }
@@ -302,6 +318,67 @@ impl ServerState {
                 let out = json!({ "target": target, "count": views.len(), "memories": views });
                 Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string()))
             }
+            "remember" => {
+                let fqn = args
+                    .get("anchor")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::BadArg("missing required argument: anchor".into()))?;
+                let kind_str = args
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::BadArg("missing required argument: kind".into()))?;
+                let content = args.get("content").and_then(Value::as_str).ok_or_else(|| {
+                    ToolError::BadArg("missing required argument: content".into())
+                })?;
+                let kind = parse_kind(kind_str).ok_or_else(|| {
+                    ToolError::BadArg(format!(
+                        "unknown kind '{kind_str}' (expected decision, gotcha, invariant, or bughistory)"
+                    ))
+                })?;
+                let node = self
+                    .graph
+                    .nodes()
+                    .iter()
+                    .find(|n| n.fqn == fqn)
+                    .ok_or_else(|| {
+                        ToolError::BadArg(format!(
+                            "no symbol '{fqn}' in the current index; the anchor must exist"
+                        ))
+                    })?;
+                let anchor = AnchorKey {
+                    fqn: node.fqn.clone(),
+                    sig_hash: node.sig_hash.clone(),
+                };
+                let count = self
+                    .memory_store
+                    .load_events()
+                    .map_err(|e| ToolError::BadArg(format!("reading memory log: {e}")))?
+                    .len();
+                let id = MemoryId(format!("mem-{count}"));
+                let provenance = Provenance {
+                    commit: args
+                        .get("commit")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                    session: args
+                        .get("session")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                };
+                let memory = Memory {
+                    id: id.clone(),
+                    content: content.to_string(),
+                    anchor,
+                    scope: Scope::Symbol(fqn.to_string()),
+                    kind,
+                    status: Status::Intact,
+                    provenance,
+                };
+                self.memory_store
+                    .append(&Event::Created { memory })
+                    .map_err(|e| ToolError::BadArg(format!("writing memory log: {e}")))?;
+                Ok(format!("remembered {} anchored to {fqn}", id.0))
+            }
             other => Err(ToolError::Unknown(other.to_string())),
         }
     }
@@ -332,6 +409,16 @@ fn arg_usize(args: &Value, key: &str, default: usize) -> usize {
         .and_then(Value::as_u64)
         .map(|n| n as usize)
         .unwrap_or(default)
+}
+
+fn parse_kind(s: &str) -> Option<Kind> {
+    match s.to_ascii_lowercase().as_str() {
+        "decision" => Some(Kind::Decision),
+        "gotcha" => Some(Kind::Gotcha),
+        "invariant" => Some(Kind::Invariant),
+        "bughistory" | "bug_history" | "bug-history" => Some(Kind::BugHistory),
+        _ => None,
+    }
 }
 
 fn scope_matches(scope: &Scope, target: &str) -> bool {
@@ -424,8 +511,6 @@ fn write_message(out: &mut impl Write, msg: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::memory::model::{AnchorKey, Kind, MemoryId, Provenance, Status};
-    use crate::memory::store::Event;
     use crate::model::{Node, NodeId, NodeKind};
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -504,7 +589,7 @@ mod tests {
             .handle(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
             .expect("response");
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 6);
     }
 
     #[test]
@@ -621,6 +706,62 @@ mod tests {
             .handle(&json!({
                 "jsonrpc": "2.0", "id": 12, "method": "tools/call",
                 "params": { "name": "recall", "arguments": {} }
+            }))
+            .expect("response");
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn test_remember_appends_and_is_recallable() {
+        let dir = TempDir::new();
+        let mut s = state_at(dir.0.clone());
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 20, "method": "tools/call",
+                "params": { "name": "remember", "arguments": {
+                    "anchor": "foo", "kind": "decision", "content": "chose FNV for stability"
+                } }
+            }))
+            .expect("response");
+        assert_eq!(resp["result"]["isError"], false);
+
+        let recalled = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 21, "method": "tools/call",
+                "params": { "name": "recall", "arguments": { "target": "foo" } }
+            }))
+            .expect("response");
+        let text = recalled["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text");
+        assert!(text.contains("chose FNV for stability"));
+        // Anchored to the live signature, so it recalls as intact.
+        assert!(text.contains("\"status\": \"intact\""));
+    }
+
+    #[test]
+    fn test_remember_unknown_anchor_is_error() {
+        let mut s = sample_state();
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 22, "method": "tools/call",
+                "params": { "name": "remember", "arguments": {
+                    "anchor": "does_not_exist", "kind": "gotcha", "content": "x"
+                } }
+            }))
+            .expect("response");
+        assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn test_remember_unknown_kind_is_error() {
+        let mut s = sample_state();
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 23, "method": "tools/call",
+                "params": { "name": "remember", "arguments": {
+                    "anchor": "foo", "kind": "nonsense", "content": "x"
+                } }
             }))
             .expect("response");
         assert_eq!(resp["result"]["isError"], true);
