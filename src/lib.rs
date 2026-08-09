@@ -7,6 +7,7 @@ pub mod builder;
 pub mod cache;
 pub mod graph;
 pub mod mcp;
+pub mod memory;
 pub mod model;
 pub mod parser;
 pub mod query;
