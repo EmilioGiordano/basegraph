@@ -13,6 +13,9 @@ use serde_json::{json, Value};
 use crate::builder::build_graph;
 use crate::cache::{Cache, JsonCache};
 use crate::graph::Graph;
+use crate::memory::anchor::{classify, Classification, ReanchorBasis};
+use crate::memory::model::{Memory, Scope};
+use crate::memory::store::MemoryStore;
 use crate::query;
 use crate::tokens::HeuristicCounter;
 
@@ -70,6 +73,7 @@ struct ServerState {
     graph: Graph,
     mtime: Option<SystemTime>,
     counter: HeuristicCounter,
+    memory_store: MemoryStore,
 }
 
 impl ServerState {
@@ -88,6 +92,7 @@ impl ServerState {
             cache_path: cache_path.to_path_buf(),
             graph,
             counter: HeuristicCounter,
+            memory_store: MemoryStore::new(dir),
         })
     }
 
@@ -144,7 +149,7 @@ impl ServerState {
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "codegraph", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source."
+                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source. Use `recall` to fetch what's known about a file or symbol — each memory is tagged with how fresh its anchor is against the current code."
             }),
         )
     }
@@ -202,6 +207,18 @@ impl ServerState {
                             "outline": { "type": "boolean", "description": "Return a skeleton: signature plus control-flow headers and match arms" }
                         },
                         "required": ["symbol"],
+                        "additionalProperties": false
+                    }
+                },
+                {
+                    "name": "recall",
+                    "description": "Retrieve stored memories (decisions, gotchas, invariants, past bugs) about a file or symbol. Each memory is annotated with its freshness against the current index: intact, evolved (interface changed), or orphaned (anchor gone, with any uncertain re-anchor candidates). Use before changing a symbol to learn what past work recorded about it.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "target": { "type": "string", "description": "A file path or a symbol's fully-qualified name" }
+                        },
+                        "required": ["target"],
                         "additionalProperties": false
                     }
                 }
@@ -268,6 +285,23 @@ impl ServerState {
                     .ok_or_else(|| ToolError::BadArg("missing required argument: symbol".into()))?;
                 Ok(query::show(&self.graph, symbol, &show_mode(args), true))
             }
+            "recall" => {
+                let target = args
+                    .get("target")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| ToolError::BadArg("missing required argument: target".into()))?;
+                let memories = self
+                    .memory_store
+                    .materialize()
+                    .map_err(|e| ToolError::BadArg(format!("reading memory log: {e}")))?;
+                let views: Vec<Value> = memories
+                    .iter()
+                    .filter(|m| scope_matches(&m.scope, target))
+                    .map(|m| memory_view(m, &self.graph))
+                    .collect();
+                let out = json!({ "target": target, "count": views.len(), "memories": views });
+                Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string()))
+            }
             other => Err(ToolError::Unknown(other.to_string())),
         }
     }
@@ -298,6 +332,59 @@ fn arg_usize(args: &Value, key: &str, default: usize) -> usize {
         .and_then(Value::as_u64)
         .map(|n| n as usize)
         .unwrap_or(default)
+}
+
+fn scope_matches(scope: &Scope, target: &str) -> bool {
+    match scope {
+        Scope::File(p) => p == target,
+        Scope::Symbol(s) => s == target,
+    }
+}
+
+fn scope_label(scope: &Scope) -> String {
+    match scope {
+        Scope::File(p) => format!("file {p}"),
+        Scope::Symbol(s) => format!("symbol {s}"),
+    }
+}
+
+fn status_label(classification: &Classification) -> &'static str {
+    match classification {
+        Classification::Intact => "intact",
+        Classification::Evolved => "evolved",
+        Classification::ReanchorCandidate { .. } | Classification::Orphaned => "orphaned",
+    }
+}
+
+fn basis_label(basis: &ReanchorBasis) -> &'static str {
+    match basis {
+        ReanchorBasis::SigHash => "same signature hash",
+        ReanchorBasis::TokenSimilarity => "similar name",
+    }
+}
+
+/// Render one memory as JSON, always tagged with its freshness against the
+/// current index so a memory is never served without saying how stale it is.
+fn memory_view(memory: &Memory, graph: &Graph) -> Value {
+    let classification = classify(&memory.anchor, graph);
+    let mut view = json!({
+        "id": memory.id.0,
+        "kind": format!("{:?}", memory.kind),
+        "scope": scope_label(&memory.scope),
+        "content": memory.content,
+        "anchor": { "fqn": memory.anchor.fqn, "sig_hash": memory.anchor.sig_hash },
+        "status": status_label(&classification),
+        "uncertain": classification.is_uncertain(),
+        "provenance": {
+            "commit": memory.provenance.commit,
+            "session": memory.provenance.session,
+        },
+    });
+    if let Classification::ReanchorCandidate { candidates, basis } = &classification {
+        view["reanchor_candidates"] = json!(candidates);
+        view["reanchor_basis"] = json!(basis_label(basis));
+    }
+    view
 }
 
 fn show_mode(args: &Value) -> query::ShowMode {
@@ -337,9 +424,35 @@ fn write_message(out: &mut impl Write, msg: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory::model::{AnchorKey, Kind, MemoryId, Provenance, Status};
+    use crate::memory::store::Event;
     use crate::model::{Node, NodeId, NodeKind};
+    use std::sync::atomic::{AtomicU32, Ordering};
 
-    fn sample_state() -> ServerState {
+    static COUNTER: AtomicU32 = AtomicU32::new(0);
+
+    fn temp_dir() -> PathBuf {
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!("cg_mcp_{}_{n}", std::process::id()))
+    }
+
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new() -> Self {
+            let dir = temp_dir();
+            std::fs::create_dir_all(&dir).expect("create temp dir");
+            Self(dir)
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn sample_graph() -> Graph {
         let mut g = Graph::new();
         g.add_node(Node {
             id: NodeId(0),
@@ -347,18 +460,27 @@ mod tests {
             name: "foo".into(),
             fqn: "foo".into(),
             signature: "fn foo()".into(),
-            sig_hash: String::new(),
+            sig_hash: "aaaabbbbccccdddd".into(),
             file: "a.rs".into(),
             line_start: 1,
             line_end: 1,
             doc: None,
         });
+        g
+    }
+
+    fn state_at(dir: PathBuf) -> ServerState {
         ServerState {
             cache_path: PathBuf::from("<test>"),
-            graph: g,
+            graph: sample_graph(),
             mtime: None,
             counter: HeuristicCounter,
+            memory_store: MemoryStore::new(dir),
         }
+    }
+
+    fn sample_state() -> ServerState {
+        state_at(temp_dir())
     }
 
     #[test]
@@ -382,7 +504,7 @@ mod tests {
             .handle(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
             .expect("response");
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 5);
     }
 
     #[test]
@@ -442,5 +564,65 @@ mod tests {
         let mut s = sample_state();
         let resp = s.handle(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
         assert!(resp.is_none());
+    }
+
+    #[test]
+    fn test_recall_empty_returns_no_memories() {
+        let mut s = sample_state();
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+                "params": { "name": "recall", "arguments": { "target": "foo" } }
+            }))
+            .expect("response");
+        assert_eq!(resp["result"]["isError"], false);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("\"count\": 0"));
+    }
+
+    #[test]
+    fn test_recall_returns_memory_with_freshness() {
+        let dir = TempDir::new();
+        let mut s = state_at(dir.0.clone());
+        s.memory_store
+            .append(&Event::Created {
+                memory: Memory {
+                    id: MemoryId("m1".into()),
+                    content: "foo must stay pure".into(),
+                    anchor: AnchorKey {
+                        fqn: "foo".into(),
+                        sig_hash: "aaaabbbbccccdddd".into(),
+                    },
+                    scope: Scope::Symbol("foo".into()),
+                    kind: Kind::Invariant,
+                    status: Status::Intact,
+                    provenance: Provenance::default(),
+                },
+            })
+            .expect("append");
+
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 11, "method": "tools/call",
+                "params": { "name": "recall", "arguments": { "target": "foo" } }
+            }))
+            .expect("response");
+        assert_eq!(resp["result"]["isError"], false);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("foo must stay pure"));
+        // The anchor still matches, so the memory is served as intact.
+        assert!(text.contains("\"status\": \"intact\""));
+    }
+
+    #[test]
+    fn test_recall_missing_target_is_error() {
+        let mut s = sample_state();
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 12, "method": "tools/call",
+                "params": { "name": "recall", "arguments": {} }
+            }))
+            .expect("response");
+        assert_eq!(resp["result"]["isError"], true);
     }
 }
