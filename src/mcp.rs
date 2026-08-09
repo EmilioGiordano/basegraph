@@ -14,7 +14,7 @@ use crate::builder::build_graph;
 use crate::cache::{Cache, JsonCache};
 use crate::graph::Graph;
 use crate::memory::anchor::{classify, Classification, ReanchorBasis};
-use crate::memory::model::{AnchorKey, Kind, Memory, MemoryId, Provenance, Scope, Status};
+use crate::memory::model::{AnchorKey, Kind, Memory, MemoryId, Provenance, Scope};
 use crate::memory::store::{Event, MemoryStore};
 use crate::parser::sig;
 use crate::query;
@@ -373,7 +373,6 @@ impl ServerState {
                     anchor,
                     scope: Scope::Symbol(fqn.to_string()),
                     kind,
-                    status: Status::Intact,
                     provenance,
                 };
                 self.memory_store
@@ -684,7 +683,6 @@ mod tests {
                     },
                     scope: Scope::Symbol("foo".into()),
                     kind: Kind::Invariant,
-                    status: Status::Intact,
                     provenance: Provenance::default(),
                 },
             })

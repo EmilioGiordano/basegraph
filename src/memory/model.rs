@@ -39,7 +39,8 @@ pub enum Scope {
     Symbol(String),
 }
 
-/// How the anchor stands relative to the current index.
+/// How the anchor stands relative to the current index. Computed live by the
+/// classifier on read; never stored on a [`Memory`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Status {
     Intact,
@@ -63,7 +64,6 @@ pub struct Memory {
     pub anchor: AnchorKey,
     pub scope: Scope,
     pub kind: Kind,
-    pub status: Status,
     pub provenance: Provenance,
 }
 
@@ -82,7 +82,6 @@ mod tests {
             },
             scope: Scope::Symbol("graph::Graph::neighbors".into()),
             kind: Kind::Invariant,
-            status: Status::Intact,
             provenance: Provenance {
                 commit: Some("deadbeef".into()),
                 session: Some("s-42".into()),
@@ -103,7 +102,6 @@ mod tests {
         let mem = Memory {
             scope: Scope::File("src/builder.rs".into()),
             kind: Kind::BugHistory,
-            status: Status::Orphaned,
             provenance: Provenance::default(),
             ..sample()
         };

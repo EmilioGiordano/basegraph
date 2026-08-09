@@ -10,17 +10,19 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::memory::model::{AnchorKey, Memory, MemoryId, Status};
+use crate::memory::model::{AnchorKey, Memory, MemoryId};
 
 const EVENT_VERSION: u32 = 1;
 const MEMORY_LOG_FILE: &str = "codegraph-memory.jsonl";
 
 /// A single mutation to the memory log.
+///
+/// `Reanchored` and `Superseded` are reserved for the future re-anchor
+/// confirmation write-path; nothing emits them yet (only `Created` is written).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Event {
     Created { memory: Memory },
     Reanchored { id: MemoryId, anchor: AnchorKey },
-    StatusChanged { id: MemoryId, status: Status },
     Superseded { id: MemoryId },
 }
 
@@ -128,13 +130,6 @@ fn fold(events: Vec<Event>) -> Vec<Memory> {
                     }
                 }
             }
-            Event::StatusChanged { id, status } => {
-                if let Some(&i) = index.get(&id) {
-                    if let Some(m) = &mut slots[i] {
-                        m.status = status;
-                    }
-                }
-            }
             Event::Superseded { id } => {
                 if let Some(i) = index.remove(&id) {
                     slots[i] = None;
@@ -181,7 +176,6 @@ mod tests {
             },
             scope: Scope::Symbol(fqn.into()),
             kind: Kind::Decision,
-            status: Status::Intact,
             provenance: Provenance::default(),
         }
     }
@@ -255,26 +249,6 @@ mod tests {
         let mems = store.materialize().expect("materialize");
         assert_eq!(mems.len(), 1);
         assert_eq!(mems[0].anchor.fqn, "b::f");
-    }
-
-    #[test]
-    fn status_changed_updates_status() {
-        let dir = TempDir::new();
-        let store = MemoryStore::new(&dir.0);
-        store
-            .append(&Event::Created {
-                memory: memory("m1", "a::f", "h1"),
-            })
-            .expect("append");
-        store
-            .append(&Event::StatusChanged {
-                id: MemoryId("m1".into()),
-                status: Status::Evolved,
-            })
-            .expect("status change");
-
-        let mems = store.materialize().expect("materialize");
-        assert_eq!(mems[0].status, Status::Evolved);
     }
 
     #[test]
