@@ -7,3 +7,7 @@ Thumbs.db
 
 # CodeGraph runtime cache
 /.codegraph/
+
+# Experiment artifacts (regenerate with synth_repo_gen / experiment_runner)
+/synth_repos/
+/results/

@@ -19,3 +19,18 @@ path = "src/lib.rs"
 [[bin]]
 name = "codegraph"
 path = "src/main.rs"
+
+# Experiment harness for the go/no-go protocol (go-no-go.md). Separate binaries
+# so the product crate stays free of experiment logic; they share only the
+# schema in tools/common.
+[[bin]]
+name = "synth_repo_gen"
+path = "tools/synth_repo_gen/main.rs"
+
+[[bin]]
+name = "experiment_runner"
+path = "tools/experiment_runner/main.rs"
+
+[[bin]]
+name = "scorer"
+path = "tools/scorer/main.rs"
