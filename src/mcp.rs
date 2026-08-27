@@ -1,10 +1,13 @@
 //! Minimal stdio JSON-RPC server implementing the MCP protocol (2025-11-25).
 //!
-//! Exposes `map`, `context`, `search` and `show` as MCP tools over one codebase
-//! so any MCP client (Claude Code, Cursor, ...) can query the graph natively.
+//! Exposes the graph queries (`map`, `context`, `search`, `show`) and the memory
+//! lifecycle (`recall`, `remember`, `reanchor`, `supersede`, `generate_test`) as
+//! MCP tools over one codebase, so any MCP client (Claude Code, Cursor, ...)
+//! can use them natively.
 
+use std::ffi::OsStr;
 use std::io::{BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::SystemTime;
 
 use anyhow::{Context, Result};
@@ -16,6 +19,7 @@ use crate::graph::Graph;
 use crate::memory::anchor::{self, classify, Classification, ReanchorBasis};
 use crate::memory::model::{Kind, Memory, MemoryId, Provenance, Scope};
 use crate::memory::store::{Event, MemoryStore};
+use crate::memory::testgen::{self, Assertion};
 use crate::query;
 use crate::tokens::HeuristicCounter;
 
@@ -69,6 +73,8 @@ pub fn serve(dir: PathBuf) -> Result<()> {
 }
 
 struct ServerState {
+    /// The indexed directory; generated files are only ever written under it.
+    dir: PathBuf,
     cache_path: PathBuf,
     graph: Graph,
     mtime: Option<SystemTime>,
@@ -88,6 +94,7 @@ impl ServerState {
             g
         };
         Ok(Self {
+            dir: dir.to_path_buf(),
             mtime: file_mtime(cache_path),
             cache_path: cache_path.to_path_buf(),
             graph,
@@ -149,7 +156,7 @@ impl ServerState {
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "codegraph", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source. Use `recall` to fetch what's known about a file or symbol — each memory is tagged with how fresh its anchor is against the current code — and `remember` to record a decision, gotcha, invariant, or past bug anchored to a symbol. When recall reports a memory as evolved or with re-anchor candidates, `reanchor` confirms where it now belongs, and `supersede` retires a memory that no longer applies."
+                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source. Use `recall` to fetch what's known about a file or symbol — each memory is tagged with how fresh its anchor is against the current code — and `remember` to record a decision, gotcha, invariant, or past bug anchored to a symbol. When recall reports a memory as evolved or with re-anchor candidates, `reanchor` confirms where it now belongs, and `supersede` retires a memory that no longer applies. `generate_test` turns an intact invariant memory into an executable test."
             }),
         )
     }
@@ -260,6 +267,19 @@ impl ServerState {
                             "memory_id": { "type": "string", "description": "Id of the memory to retire" }
                         },
                         "required": ["memory_id"],
+                        "additionalProperties": false
+                    }
+                },
+                {
+                    "name": "generate_test",
+                    "description": "Turn an invariant memory into an executable Rust test. Writes a #[test] that imports the anchored pub free function from its crate, calls it with Default::default() inputs and asserts the property inferred from the memory's wording (sorted / not null / non-empty / positive; anything else panics until encoded by hand). The anchor must be intact: confirm with reanchor first if the code drifted. Writes <output_path>/invariant_<memory_id>.rs (or output_path itself when it ends in .rs) inside the indexed directory; a file placed directly in tests/ runs with `cargo test --test invariant_<memory_id>`.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "memory_id": { "type": "string", "description": "Id of an invariant memory" },
+                            "output_path": { "type": "string", "description": "Directory (e.g. tests) or .rs file path, relative to the indexed directory" }
+                        },
+                        "required": ["memory_id", "output_path"],
                         "additionalProperties": false
                     }
                 }
@@ -434,6 +454,49 @@ impl ServerState {
                     memory.id.0, memory.anchor.fqn
                 ))
             }
+            "generate_test" => {
+                let memory_id = required_str(args, "memory_id")?;
+                let requested = relative_output_path(required_str(args, "output_path")?)?;
+                let memory = self.find_memory(memory_id)?;
+                let generated = testgen::generate(&memory, &self.graph).map_err(|e| {
+                    ToolError::BadArg(format!("cannot generate a test for {memory_id}: {e}"))
+                })?;
+                let path = if requested.extension() == Some(OsStr::new("rs")) {
+                    self.dir.join(requested)
+                } else {
+                    self.dir.join(requested).join(&generated.file_name)
+                };
+                let overwritten = path.is_file();
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| {
+                        ToolError::BadArg(format!("creating {}: {e}", parent.display()))
+                    })?;
+                }
+                std::fs::write(&path, &generated.source)
+                    .map_err(|e| ToolError::BadArg(format!("writing {}: {e}", path.display())))?;
+                let in_tests_dir =
+                    path.parent().and_then(Path::file_name) == Some(OsStr::new("tests"));
+                let mut notes = Vec::new();
+                if !in_tests_dir {
+                    notes.push("cargo auto-discovers only tests/*.rs; add a [[test]] target for this file or write it into tests/");
+                }
+                if generated.assertion == Assertion::Unencoded {
+                    notes.push("no assertion was inferred from the memory's wording; the test panics until the invariant is encoded by hand");
+                }
+                let report = json!({
+                    "memory_id": memory.id.0,
+                    "symbol": memory.anchor.fqn,
+                    "test": generated.test_name,
+                    "assertion": generated.assertion.label(),
+                    "condition": generated.assertion.condition(),
+                    "imports": generated.import_path,
+                    "path": path.display().to_string(),
+                    "overwritten": overwritten,
+                    "run": in_tests_dir.then(|| format!("cargo test --test {}", generated.test_name)),
+                    "notes": notes,
+                });
+                Ok(serde_json::to_string_pretty(&report).unwrap_or_else(|_| report.to_string()))
+            }
             other => Err(ToolError::Unknown(other.to_string())),
         }
     }
@@ -477,6 +540,23 @@ fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError> {
     args.get(key)
         .and_then(Value::as_str)
         .ok_or_else(|| ToolError::BadArg(format!("missing required argument: {key}")))
+}
+
+/// Generated files stay inside the indexed directory: the path must be
+/// relative and free of `..`.
+fn relative_output_path(output_path: &str) -> Result<&Path, ToolError> {
+    let path = Path::new(output_path);
+    let inside = !output_path.trim().is_empty()
+        && path
+            .components()
+            .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+    if inside {
+        Ok(path)
+    } else {
+        Err(ToolError::BadArg(
+            "output_path must be a relative path inside the indexed directory (no `..`, no absolute paths)".into(),
+        ))
+    }
 }
 
 fn arg_usize(args: &Value, key: &str, default: usize) -> usize {
@@ -637,8 +717,23 @@ mod tests {
             graph: sample_graph(),
             mtime: None,
             counter: HeuristicCounter,
-            memory_store: MemoryStore::new(dir),
+            memory_store: MemoryStore::new(&dir),
+            dir,
         }
+    }
+
+    /// A state over a real one-file crate on disk, indexed for real.
+    fn crate_state(dir: &TempDir, lib: &str) -> ServerState {
+        std::fs::create_dir_all(dir.0.join("src")).expect("src dir");
+        std::fs::write(
+            dir.0.join("Cargo.toml"),
+            "[package]\nname = \"demo-crate\"\nversion = \"0.1.0\"\n",
+        )
+        .expect("manifest");
+        std::fs::write(dir.0.join("src").join("lib.rs"), lib).expect("lib.rs");
+        let mut s = state_at(dir.0.clone());
+        s.graph = build_graph(&dir.0).expect("build graph");
+        s
     }
 
     fn sample_state() -> ServerState {
@@ -666,7 +761,163 @@ mod tests {
             .handle(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
             .expect("response");
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 9);
+    }
+
+    #[test]
+    fn test_generate_test_missing_args_is_error() {
+        let mut s = sample_state();
+        let (is_error, text) = call(&mut s, "generate_test", json!({ "memory_id": "m1" }));
+        assert!(is_error);
+        assert!(text.contains("output_path"), "{text}");
+    }
+
+    #[test]
+    fn test_generate_test_rejects_paths_outside_the_repo() {
+        let mut s = sample_state();
+        for bad in ["../elsewhere", "tests/../../x.rs", "/abs/tests", "", "  "] {
+            let (is_error, text) = call(
+                &mut s,
+                "generate_test",
+                json!({ "memory_id": "m1", "output_path": bad }),
+            );
+            assert!(is_error, "{bad:?}");
+            assert!(text.contains("output_path must be"), "{bad:?}: {text}");
+        }
+    }
+
+    #[test]
+    fn test_generate_test_unknown_memory_is_error() {
+        let mut s = sample_state();
+        let (is_error, text) = call(
+            &mut s,
+            "generate_test",
+            json!({ "memory_id": "nope", "output_path": "tests" }),
+        );
+        assert!(is_error);
+        assert!(text.contains("no memory `nope`"), "{text}");
+    }
+
+    #[test]
+    fn test_generate_test_rejects_non_invariants() {
+        let dir = TempDir::new();
+        let mut s = state_at(dir.0.clone());
+        s.memory_store
+            .append(&Event::Created {
+                memory: Memory {
+                    kind: Kind::Decision,
+                    ..anchored_memory(AnchorKey {
+                        fqn: "foo".into(),
+                        sig_hash: "aaaabbbbccccdddd".into(),
+                        shape_hash: String::new(),
+                    })
+                },
+            })
+            .expect("append");
+        let (is_error, text) = call(
+            &mut s,
+            "generate_test",
+            json!({ "memory_id": "m1", "output_path": "tests" }),
+        );
+        assert!(is_error);
+        assert!(text.contains("not an invariant"), "{text}");
+    }
+
+    #[test]
+    fn test_generate_test_refuses_a_drifted_anchor() {
+        let dir = TempDir::new();
+        let mut s = crate_state(&dir, "pub fn compute(x: i32) -> i32 { x + 1 }\n");
+        s.memory_store
+            .append(&Event::Created {
+                memory: anchored_memory(AnchorKey {
+                    fqn: "compute".into(),
+                    sig_hash: "0000000000000000".into(),
+                    shape_hash: String::new(),
+                }),
+            })
+            .expect("append");
+        let (is_error, text) = call(
+            &mut s,
+            "generate_test",
+            json!({ "memory_id": "m1", "output_path": "tests" }),
+        );
+        assert!(is_error);
+        assert!(
+            text.contains("evolved") && text.contains("reanchor"),
+            "{text}"
+        );
+        assert!(!dir.0.join("tests").exists(), "nothing should be written");
+    }
+
+    #[test]
+    fn test_generate_test_writes_the_file_and_reports() {
+        let dir = TempDir::new();
+        let mut s = crate_state(&dir, "pub fn compute(x: i32) -> i32 { x + 1 }\n");
+        let (is_error, text) = call(
+            &mut s,
+            "remember",
+            json!({ "anchor": "compute", "kind": "invariant", "content": "always positive" }),
+        );
+        assert!(!is_error, "{text}");
+
+        let (is_error, text) = call(
+            &mut s,
+            "generate_test",
+            json!({ "memory_id": "mem-0", "output_path": "tests" }),
+        );
+        assert!(!is_error, "{text}");
+        let report: Value = serde_json::from_str(&text).expect("json report");
+        assert_eq!(report["symbol"], "compute");
+        assert_eq!(report["test"], "invariant_mem_0");
+        assert_eq!(report["assertion"], "positive");
+        assert_eq!(report["condition"], "result > Default::default()");
+        assert_eq!(report["imports"], "demo_crate::compute");
+        assert_eq!(report["run"], "cargo test --test invariant_mem_0");
+        assert_eq!(report["overwritten"], false);
+        assert_eq!(report["notes"].as_array().map(Vec::len), Some(0));
+        let path = dir.0.join("tests").join("invariant_mem_0.rs");
+        assert_eq!(report["path"], path.display().to_string());
+        let source = std::fs::read_to_string(&path).expect("generated file");
+        assert!(source.contains("use demo_crate::compute;"), "{source}");
+        assert!(source.contains("fn invariant_mem_0()"), "{source}");
+
+        // Regenerating overwrites, and says so.
+        let (_, text) = call(
+            &mut s,
+            "generate_test",
+            json!({ "memory_id": "mem-0", "output_path": "tests" }),
+        );
+        let report: Value = serde_json::from_str(&text).expect("json report");
+        assert_eq!(report["overwritten"], true);
+    }
+
+    #[test]
+    fn test_generate_test_explicit_file_outside_tests_gets_notes() {
+        let dir = TempDir::new();
+        let mut s = crate_state(&dir, "pub fn touch() {}\n");
+        let (is_error, text) = call(
+            &mut s,
+            "remember",
+            json!({ "anchor": "touch", "kind": "invariant", "content": "must be idempotent" }),
+        );
+        assert!(!is_error, "{text}");
+        let (is_error, text) = call(
+            &mut s,
+            "generate_test",
+            json!({ "memory_id": "mem-0", "output_path": "checks/generated/touch_check.rs" }),
+        );
+        assert!(!is_error, "{text}");
+        let report: Value = serde_json::from_str(&text).expect("json report");
+        assert_eq!(report["assertion"], "unencoded");
+        assert!(report["condition"].is_null());
+        assert!(report["run"].is_null());
+        assert_eq!(report["notes"].as_array().map(Vec::len), Some(2));
+        assert!(dir
+            .0
+            .join("checks")
+            .join("generated")
+            .join("touch_check.rs")
+            .is_file());
     }
 
     #[test]
