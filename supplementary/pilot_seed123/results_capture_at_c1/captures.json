@@ -1,0 +1,22 @@
+[
+  {
+    "repo_id": "repo_01",
+    "arm": "a1",
+    "file": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_01\\a1\\gotchas.md",
+    "usable": true,
+    "entries": 23,
+    "transcript": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_01\\a1\\transcript.jsonl",
+    "time_secs": 85.0011352,
+    "notes": []
+  },
+  {
+    "repo_id": "repo_01",
+    "arm": "a2",
+    "file": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_01\\a2\\codegraph-memory.jsonl",
+    "usable": true,
+    "entries": 4,
+    "transcript": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_01\\a2\\transcript.jsonl",
+    "time_secs": 127.0651892,
+    "notes": []
+  }
+]

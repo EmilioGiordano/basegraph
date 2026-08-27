@@ -1,0 +1,5 @@
+# Gotchas
+
+- matching::affinity_score — MUST be symmetric: `affinity_score(a, b) == affinity_score(b, a)` for all profiles. The discovery board computes the score independently from each party's side (`score(me, other)`), so any asymmetry shows as "mismatched scores". Never weight a tag by its position/rank in `left.tags` (or anything else derived from only one side) — the fix in c127cb8 replaced rank-weighted tags with a plain shared-tag count for exactly this reason. Guarded by test `board_scores_agree_for_both_parties`; keep it.
+- matching::affinity_score — the city bonus constant (3) is load-bearing outside matching: `registry_log::registry_log_capacity_hint`, `vault_log::vault_log_capacity_hint` and `checkpoint_index::checkpoint_index_capacity_hint` derive a capacity hint from `affinity_score` of two empty-tag, same-city profiles (== city bonus). Changing that constant silently changes those hints.
+- matching::best_match — `Profile::blocked` is NOT consulted by `best_match`/`affinity_score`; blocked profiles can still be returned as the best match. Filter candidates before calling if that matters.

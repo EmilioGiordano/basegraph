@@ -1,0 +1,979 @@
+{
+  "runs": 18,
+  "tasks": 6,
+  "drift_tasks": 4,
+  "seeds": [
+    0
+  ],
+  "arms": [
+    "a0",
+    "a1",
+    "a2"
+  ],
+  "primary": {
+    "seed": 0,
+    "all": {
+      "a0": {
+        "runs": 6,
+        "violation": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "fix_pass": {
+          "hits": 6,
+          "n": 6,
+          "rate": 1.0,
+          "ci_low": 0.6096569663469354,
+          "ci_high": 0.9999999999999999
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "material_used": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "mean_tokens": 8875.166666666666,
+        "mean_time_secs": 31.6469323,
+        "violation_unknown": 0
+      },
+      "a1": {
+        "runs": 6,
+        "violation": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "fix_pass": {
+          "hits": 6,
+          "n": 6,
+          "rate": 1.0,
+          "ci_low": 0.6096569663469354,
+          "ci_high": 0.9999999999999999
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "material_used": {
+          "hits": 6,
+          "n": 6,
+          "rate": 1.0,
+          "ci_low": 0.6096569663469354,
+          "ci_high": 0.9999999999999999
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "mean_tokens": 10702.333333333334,
+        "mean_time_secs": 37.835081816666666,
+        "violation_unknown": 0
+      },
+      "a2": {
+        "runs": 6,
+        "violation": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "fix_pass": {
+          "hits": 6,
+          "n": 6,
+          "rate": 1.0,
+          "ci_low": 0.6096569663469354,
+          "ci_high": 0.9999999999999999
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "material_used": {
+          "hits": 6,
+          "n": 6,
+          "rate": 1.0,
+          "ci_low": 0.6096569663469354,
+          "ci_high": 0.9999999999999999
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "mean_tokens": 13513.333333333334,
+        "mean_time_secs": 50.52582618333333,
+        "violation_unknown": 0
+      }
+    },
+    "drift": {
+      "a0": {
+        "runs": 4,
+        "violation": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "fix_pass": {
+          "hits": 4,
+          "n": 4,
+          "rate": 1.0,
+          "ci_low": 0.5100999795960008,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "material_used": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "mean_tokens": 8700.25,
+        "mean_time_secs": 31.969207025,
+        "violation_unknown": 0
+      },
+      "a1": {
+        "runs": 4,
+        "violation": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "fix_pass": {
+          "hits": 4,
+          "n": 4,
+          "rate": 1.0,
+          "ci_low": 0.5100999795960008,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "material_used": {
+          "hits": 4,
+          "n": 4,
+          "rate": 1.0,
+          "ci_low": 0.5100999795960008,
+          "ci_high": 1.0
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "mean_tokens": 11207.25,
+        "mean_time_secs": 40.509274425,
+        "violation_unknown": 0
+      },
+      "a2": {
+        "runs": 4,
+        "violation": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "fix_pass": {
+          "hits": 4,
+          "n": 4,
+          "rate": 1.0,
+          "ci_low": 0.5100999795960008,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "material_used": {
+          "hits": 4,
+          "n": 4,
+          "rate": 1.0,
+          "ci_low": 0.5100999795960008,
+          "ci_high": 1.0
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "mean_tokens": 12548.0,
+        "mean_time_secs": 46.06536247499999,
+        "violation_unknown": 0
+      }
+    },
+    "no_drift": {
+      "a0": {
+        "runs": 2,
+        "violation": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "fix_pass": {
+          "hits": 2,
+          "n": 2,
+          "rate": 1.0,
+          "ci_low": 0.34237195288961925,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "material_used": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "mean_tokens": 9225.0,
+        "mean_time_secs": 31.002382850000004,
+        "violation_unknown": 0
+      },
+      "a1": {
+        "runs": 2,
+        "violation": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "fix_pass": {
+          "hits": 2,
+          "n": 2,
+          "rate": 1.0,
+          "ci_low": 0.34237195288961925,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "material_used": {
+          "hits": 2,
+          "n": 2,
+          "rate": 1.0,
+          "ci_low": 0.34237195288961925,
+          "ci_high": 1.0
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "mean_tokens": 9692.5,
+        "mean_time_secs": 32.4866966,
+        "violation_unknown": 0
+      },
+      "a2": {
+        "runs": 2,
+        "violation": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "fix_pass": {
+          "hits": 2,
+          "n": 2,
+          "rate": 1.0,
+          "ci_low": 0.34237195288961925,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "material_used": {
+          "hits": 2,
+          "n": 2,
+          "rate": 1.0,
+          "ci_low": 0.34237195288961925,
+          "ci_high": 1.0
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "mean_tokens": 15444.0,
+        "mean_time_secs": 59.446753599999994,
+        "violation_unknown": 0
+      }
+    },
+    "decision": {
+      "verdict": "Grey",
+      "condition_a": {
+        "label": "A2 vs A0",
+        "condition": "all tasks",
+        "left_arm": "a2",
+        "right_arm": "a0",
+        "left_violations": 0,
+        "right_violations": 0,
+        "tasks": 6,
+        "difference": 0,
+        "strictly_better": false,
+        "grey": true
+      },
+      "condition_b": {
+        "label": "A2 vs A1",
+        "condition": "drift",
+        "left_arm": "a2",
+        "right_arm": "a1",
+        "left_violations": 0,
+        "right_violations": 0,
+        "tasks": 4,
+        "difference": 0,
+        "strictly_better": false,
+        "grey": true
+      },
+      "false_confidence_a2": 0,
+      "false_confidence_a1": 0,
+      "false_confidence_ok": true,
+      "false_confidence_material": false,
+      "grey_zone": true,
+      "rationale": [
+        "(a) all tasks: A2 0/6 vs A0 0/6 violations (diff 0)",
+        "(b) drift: A2 0/4 vs A1 0/4 violations (diff 0); false confidence A2 0 vs A1 0",
+        "grey zone (tie or one-run difference): expand to 3 tasks per repo once"
+      ]
+    }
+  },
+  "sensitivity": [],
+  "pooled": {
+    "seed": null,
+    "all": {
+      "a0": {
+        "runs": 6,
+        "violation": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "fix_pass": {
+          "hits": 6,
+          "n": 6,
+          "rate": 1.0,
+          "ci_low": 0.6096569663469354,
+          "ci_high": 0.9999999999999999
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "material_used": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "mean_tokens": 8875.166666666666,
+        "mean_time_secs": 31.6469323,
+        "violation_unknown": 0
+      },
+      "a1": {
+        "runs": 6,
+        "violation": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "fix_pass": {
+          "hits": 6,
+          "n": 6,
+          "rate": 1.0,
+          "ci_low": 0.6096569663469354,
+          "ci_high": 0.9999999999999999
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "material_used": {
+          "hits": 6,
+          "n": 6,
+          "rate": 1.0,
+          "ci_low": 0.6096569663469354,
+          "ci_high": 0.9999999999999999
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "mean_tokens": 10702.333333333334,
+        "mean_time_secs": 37.835081816666666,
+        "violation_unknown": 0
+      },
+      "a2": {
+        "runs": 6,
+        "violation": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "fix_pass": {
+          "hits": 6,
+          "n": 6,
+          "rate": 1.0,
+          "ci_low": 0.6096569663469354,
+          "ci_high": 0.9999999999999999
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "material_used": {
+          "hits": 6,
+          "n": 6,
+          "rate": 1.0,
+          "ci_low": 0.6096569663469354,
+          "ci_high": 0.9999999999999999
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 6,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.3903430336530645
+        },
+        "mean_tokens": 13513.333333333334,
+        "mean_time_secs": 50.52582618333333,
+        "violation_unknown": 0
+      }
+    },
+    "drift": {
+      "a0": {
+        "runs": 4,
+        "violation": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "fix_pass": {
+          "hits": 4,
+          "n": 4,
+          "rate": 1.0,
+          "ci_low": 0.5100999795960008,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "material_used": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "mean_tokens": 8700.25,
+        "mean_time_secs": 31.969207025,
+        "violation_unknown": 0
+      },
+      "a1": {
+        "runs": 4,
+        "violation": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "fix_pass": {
+          "hits": 4,
+          "n": 4,
+          "rate": 1.0,
+          "ci_low": 0.5100999795960008,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "material_used": {
+          "hits": 4,
+          "n": 4,
+          "rate": 1.0,
+          "ci_low": 0.5100999795960008,
+          "ci_high": 1.0
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "mean_tokens": 11207.25,
+        "mean_time_secs": 40.509274425,
+        "violation_unknown": 0
+      },
+      "a2": {
+        "runs": 4,
+        "violation": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "fix_pass": {
+          "hits": 4,
+          "n": 4,
+          "rate": 1.0,
+          "ci_low": 0.5100999795960008,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "material_used": {
+          "hits": 4,
+          "n": 4,
+          "rate": 1.0,
+          "ci_low": 0.5100999795960008,
+          "ci_high": 1.0
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 4,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.48990002040399916
+        },
+        "mean_tokens": 12548.0,
+        "mean_time_secs": 46.06536247499999,
+        "violation_unknown": 0
+      }
+    },
+    "no_drift": {
+      "a0": {
+        "runs": 2,
+        "violation": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "fix_pass": {
+          "hits": 2,
+          "n": 2,
+          "rate": 1.0,
+          "ci_low": 0.34237195288961925,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "material_used": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "mean_tokens": 9225.0,
+        "mean_time_secs": 31.002382850000004,
+        "violation_unknown": 0
+      },
+      "a1": {
+        "runs": 2,
+        "violation": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "fix_pass": {
+          "hits": 2,
+          "n": 2,
+          "rate": 1.0,
+          "ci_low": 0.34237195288961925,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "material_used": {
+          "hits": 2,
+          "n": 2,
+          "rate": 1.0,
+          "ci_low": 0.34237195288961925,
+          "ci_high": 1.0
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "mean_tokens": 9692.5,
+        "mean_time_secs": 32.4866966,
+        "violation_unknown": 0
+      },
+      "a2": {
+        "runs": 2,
+        "violation": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "fix_pass": {
+          "hits": 2,
+          "n": 2,
+          "rate": 1.0,
+          "ci_low": 0.34237195288961925,
+          "ci_high": 1.0
+        },
+        "false_confidence": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "cap_exhausted": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "material_used": {
+          "hits": 2,
+          "n": 2,
+          "rate": 1.0,
+          "ci_low": 0.34237195288961925,
+          "ci_high": 1.0
+        },
+        "git_archaeology": {
+          "hits": 0,
+          "n": 2,
+          "rate": 0.0,
+          "ci_low": 0.0,
+          "ci_high": 0.6576280471103807
+        },
+        "mean_tokens": 15444.0,
+        "mean_time_secs": 59.446753599999994,
+        "violation_unknown": 0
+      }
+    },
+    "decision": {
+      "verdict": "Grey",
+      "condition_a": {
+        "label": "A2 vs A0",
+        "condition": "all tasks",
+        "left_arm": "a2",
+        "right_arm": "a0",
+        "left_violations": 0,
+        "right_violations": 0,
+        "tasks": 6,
+        "difference": 0,
+        "strictly_better": false,
+        "grey": true
+      },
+      "condition_b": {
+        "label": "A2 vs A1",
+        "condition": "drift",
+        "left_arm": "a2",
+        "right_arm": "a1",
+        "left_violations": 0,
+        "right_violations": 0,
+        "tasks": 4,
+        "difference": 0,
+        "strictly_better": false,
+        "grey": true
+      },
+      "false_confidence_a2": 0,
+      "false_confidence_a1": 0,
+      "false_confidence_ok": true,
+      "false_confidence_material": false,
+      "grey_zone": true,
+      "rationale": [
+        "(a) all tasks: A2 0/6 vs A0 0/6 violations (diff 0)",
+        "(b) drift: A2 0/4 vs A1 0/4 violations (diff 0); false confidence A2 0 vs A1 0",
+        "grey zone (tie or one-run difference): expand to 3 tasks per repo once"
+      ]
+    }
+  },
+  "verdict_stable_across_seeds": true,
+  "sanity_cap_warning": null,
+  "expanded": false,
+  "verdict": "Grey",
+  "rationale": [
+    "(a) all tasks: A2 0/6 vs A0 0/6 violations (diff 0)",
+    "(b) drift: A2 0/4 vs A1 0/4 violations (diff 0); false confidence A2 0 vs A1 0",
+    "grey zone (tie or one-run difference): expand to 3 tasks per repo once"
+  ]
+}

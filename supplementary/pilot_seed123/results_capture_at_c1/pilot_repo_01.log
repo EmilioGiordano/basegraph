@@ -1,0 +1,10 @@
+agent: claude cli (claude) | plan: 6 runs (0 done, 6 pending) | model: claude-fable-5 | caps: 40 turns, 900s, 400000 tokens
+capture repo_01 a1: usable (23 entries)
+capture repo_01 a2: usable (4 entries)
+[1/6] repo_01-task_1-a0-s0 violation=no fix_pass=true tokens=24938 time=80.4s
+[2/6] repo_01-task_1-a1-s0 violation=no fix_pass=true tokens=21747 time=74.8s
+[3/6] repo_01-task_2-a0-s0 violation=no fix_pass=true tokens=11001 time=39.1s
+[4/6] repo_01-task_1-a2-s0 violation=no fix_pass=true tokens=36328 time=103.7s
+[5/6] repo_01-task_2-a1-s0 violation=no fix_pass=true tokens=13322 time=53.2s
+[6/6] repo_01-task_2-a2-s0 violation=no fix_pass=true tokens=31541 time=100.8s
+wrote C:\Users\giord\Desktop\dashboard\codegraph\supplementary\pilot_seed123\results\runs.jsonl

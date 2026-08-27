@@ -1,0 +1,68 @@
+[
+  {
+    "repo_id": "repo_01",
+    "arm": "a1",
+    "captured_at": "c2",
+    "file": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_01\\a1\\gotchas.md",
+    "usable": true,
+    "entries": 5,
+    "transcript": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_01\\a1\\transcript.jsonl",
+    "time_secs": 27.0540933,
+    "notes": []
+  },
+  {
+    "repo_id": "repo_01",
+    "arm": "a2",
+    "captured_at": "c2",
+    "file": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_01\\a2\\codegraph-memory.jsonl",
+    "usable": true,
+    "entries": 2,
+    "transcript": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_01\\a2\\transcript.jsonl",
+    "time_secs": 30.6708588,
+    "notes": []
+  },
+  {
+    "repo_id": "repo_02",
+    "arm": "a1",
+    "captured_at": "c2",
+    "file": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_02\\a1\\gotchas.md",
+    "usable": true,
+    "entries": 6,
+    "transcript": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_02\\a1\\transcript.jsonl",
+    "time_secs": 37.2722019,
+    "notes": []
+  },
+  {
+    "repo_id": "repo_02",
+    "arm": "a2",
+    "captured_at": "c2",
+    "file": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_02\\a2\\codegraph-memory.jsonl",
+    "usable": true,
+    "entries": 2,
+    "transcript": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_02\\a2\\transcript.jsonl",
+    "time_secs": 33.6616356,
+    "notes": []
+  },
+  {
+    "repo_id": "repo_03",
+    "arm": "a1",
+    "captured_at": "c2",
+    "file": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_03\\a1\\gotchas.md",
+    "usable": true,
+    "entries": 4,
+    "transcript": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_03\\a1\\transcript.jsonl",
+    "time_secs": 40.4735614,
+    "notes": []
+  },
+  {
+    "repo_id": "repo_03",
+    "arm": "a2",
+    "captured_at": "c2",
+    "file": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_03\\a2\\codegraph-memory.jsonl",
+    "usable": true,
+    "entries": 3,
+    "transcript": "C:\\Users\\giord\\Desktop\\dashboard\\codegraph\\supplementary\\pilot_seed123\\results\\captures\\repo_03\\a2\\transcript.jsonl",
+    "time_secs": 51.9255421,
+    "notes": []
+  }
+]
