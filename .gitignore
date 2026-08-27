@@ -11,3 +11,9 @@ Thumbs.db
 # Experiment artifacts (regenerate with synth_repo_gen / experiment_runner)
 /synth_repos/
 /results/
+
+# Pilot working repos and run scratch (bundles/ground truth/results are versioned)
+/supplementary/pilot_seed123/repo_*/
+/supplementary/pilot_seed123/.verify/
+/supplementary/pilot_seed123/results/work/
+/supplementary/pilot_seed123/results/target/

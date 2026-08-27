@@ -188,6 +188,7 @@ fn is_git_archaeology(call: &ToolCall) -> bool {
     }
     let command = input_str(call, "command");
     let command = command.trim_start();
+    let command = command.strip_prefix("rtk ").unwrap_or(command).trim_start();
     [
         "git log",
         "git show",

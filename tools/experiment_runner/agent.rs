@@ -24,6 +24,32 @@ pub enum Phase {
     Task,
 }
 
+/// Where the memory-seeding session starts (go-no-go.md §4 vs the pilot
+/// protocol): at C1 the agent solves the bug itself and then distills; at C2
+/// the fix is already applied and the agent infers the latent invariant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaptureAt {
+    C1,
+    C2,
+}
+
+impl CaptureAt {
+    pub fn parse(s: &str) -> Option<CaptureAt> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "c1" => Some(CaptureAt::C1),
+            "c2" => Some(CaptureAt::C2),
+            _ => None,
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            CaptureAt::C1 => "c1",
+            CaptureAt::C2 => "c2",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct McpServer {
     pub name: String,
@@ -48,6 +74,7 @@ impl McpServer {
 
 pub struct AgentRequest<'a> {
     pub phase: Phase,
+    pub capture_at: CaptureAt,
     pub arm: Arm,
     pub seed: u32,
     pub cwd: &'a Path,
@@ -79,8 +106,11 @@ pub trait Agent {
     fn run(&self, req: &AgentRequest) -> Result<AgentOutcome>;
 }
 
-/// `claude -p` with the arm's tools, no auto-discovered context (`--bare`)
-/// and a permission mode that denies anything not pre-allowed.
+/// `claude -p` with the arm's tools, a strict MCP config and a permission
+/// mode that denies anything not pre-allowed. Isolation from the operator's
+/// own CLAUDE.md, hooks and plugins comes from running with an empty
+/// `CLAUDE_CONFIG_DIR` (see tools/README.md); `--bare` would do it too but
+/// cannot use a claude.ai login.
 pub struct ClaudeCli {
     pub bin: String,
 }
@@ -93,7 +123,6 @@ impl ClaudeCli {
             "--output-format".into(),
             "stream-json".into(),
             "--verbose".into(),
-            "--bare".into(),
             "--no-session-persistence".into(),
             "--permission-mode".into(),
             "dontAsk".into(),
@@ -106,13 +135,18 @@ impl ClaudeCli {
         if let Some(budget) = req.budget_usd {
             args.extend(["--max-budget-usd".into(), format!("{budget}")]);
         }
-        if let Some(mcp) = &req.mcp {
-            args.extend([
-                "--mcp-config".into(),
-                mcp.config_json(),
-                "--strict-mcp-config".into(),
-            ]);
-        }
+        // Always strict: only the server we pass (none for A0/A1) is loaded,
+        // never the user's own MCP servers.
+        let mcp_config = req
+            .mcp
+            .as_ref()
+            .map(McpServer::config_json)
+            .unwrap_or_else(|| json!({ "mcpServers": {} }).to_string());
+        args.extend([
+            "--mcp-config".into(),
+            mcp_config,
+            "--strict-mcp-config".into(),
+        ]);
         // Variadic: keep it last so it cannot swallow other arguments.
         args.push("--allowedTools".into());
         args.extend(req.allowed_tools.iter().cloned());
@@ -302,17 +336,19 @@ impl Scripted {
             json!({ "file_path": repo.anchor_file_c2 }),
             &read_or(&req.cwd.join(&repo.anchor_file_c2), ""),
         );
-        // "Solve" the C2 bug by taking the fix from history.
-        git::run(
-            req.cwd,
-            &["checkout", &repo.commits.c2, "--", &repo.anchor_file_c2],
-            &[],
-        )?;
-        script.call(
-            "Edit",
-            json!({ "file_path": repo.anchor_file_c2 }),
-            "applied the fix",
-        );
+        if req.capture_at == CaptureAt::C1 {
+            // "Solve" the C2 bug by taking the fix from history.
+            git::run(
+                req.cwd,
+                &["checkout", &repo.commits.c2, "--", &repo.anchor_file_c2],
+                &[],
+            )?;
+            script.call(
+                "Edit",
+                json!({ "file_path": repo.anchor_file_c2 }),
+                "applied the fix",
+            );
+        }
         match req.arm {
             Arm::A1 => {
                 let note = format!(
@@ -466,6 +502,7 @@ mod tests {
         let repo = repo();
         let req = AgentRequest {
             phase: Phase::Task,
+            capture_at: CaptureAt::C2,
             arm: Arm::A2,
             seed: 0,
             cwd: Path::new("."),
@@ -487,7 +524,10 @@ mod tests {
         };
         let args = ClaudeCli::command_args(&req);
         assert_eq!(&args[..2], &["-p".to_string(), "do the thing".to_string()]);
-        assert!(args.contains(&"--bare".to_string()));
+        assert!(
+            !args.contains(&"--bare".to_string()),
+            "--bare breaks claude.ai auth"
+        );
         assert!(args.contains(&"dontAsk".to_string()));
         let model_at = args.iter().position(|a| a == "--model").expect("model");
         assert_eq!(args[model_at + 1], "claude-sonnet-5");
@@ -503,6 +543,17 @@ mod tests {
             &args[tools_at + 1..],
             &["Read".to_string(), "Bash(git log *)".to_string()]
         );
+
+        // Without a server the MCP config is still passed, and still strict.
+        let plain = AgentRequest {
+            mcp: None,
+            arm: Arm::A0,
+            ..req
+        };
+        let args = ClaudeCli::command_args(&plain);
+        let mcp_at = args.iter().position(|a| a == "--mcp-config").expect("mcp");
+        assert_eq!(args[mcp_at + 1], "{\"mcpServers\":{}}");
+        assert!(args.contains(&"--strict-mcp-config".to_string()));
     }
 
     #[test]

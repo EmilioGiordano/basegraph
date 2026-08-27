@@ -52,10 +52,21 @@ experiment_runner --manifest synth_repos/manifest.json --out results \
 ```
 
 Per §4 the memory material is seeded through the real pipeline, once per
-repo and arm, before any task run: a fresh session at C1 solves the C2 bug
-and then writes `gotchas.md` (A1) or calls `remember` (A2). Raw artifacts,
-transcripts and a usability count land in `results/captures/`; nothing is
-edited by hand.
+repo and arm, before any task run. `--capture-at c2` (default, the pilot
+protocol) starts the seeding session at C2 with the fix applied and asks it
+to infer the latent invariant; `--capture-at c1` starts it at C1 with the bug
+report, so it solves the bug itself and then distills. Either way it writes
+`gotchas.md` (A1) or calls `remember` (A2). Raw artifacts, transcripts and a
+usability count land in `results/captures/`; nothing is edited by hand.
+
+The task prompt follows the pilot wording (`Task: … / <arm line> / Solve the
+task. Run: cargo test --test primary_test_N`); the primary test is exposed
+under `tests/` (hide it with `--hide-primary-test`), the oracle never is.
+
+If the account's session limit trips mid-campaign the CLI returns instantly
+with "You've hit your session limit"; those records must be removed from
+`runs.jsonl` (see `supplementary/pilot_seed123/results/invalid_credit_exhausted/`)
+and the runner re-invoked after the reset — captures are cached and reused.
 
 Per §5 every task × arm × seed is a fresh agent instance in a fresh clone at
 C3, in a seeded random order (`--order-seed`), with the same caps for every
@@ -68,9 +79,22 @@ arm:
 | A2 | `codegraph-memory.jsonl` + index; MCP server `codegraph mcp` | A0 + `mcp__codegraph__recall`/`remember` | "There is a memory tool (`recall`): consult it …" (same sentence) |
 
 The Claude Code CLI is driven headless (`claude -p … --output-format
-stream-json --bare --permission-mode dontAsk --allowedTools …`); `--bare`
-keeps CLAUDE.md, hooks and MCP auto-discovery out of the experiment. After
-the agent finishes, the primary suite and the oracle are injected and run;
+stream-json --permission-mode dontAsk --strict-mcp-config --allowedTools …`).
+Isolation from the operator's own environment is done outside the CLI:
+
+- run the runner with `CLAUDE_CONFIG_DIR` pointing at a scratch directory
+  that holds only a copy of `~/.claude/.credentials.json` — no hooks, no
+  plugins, no user MCP servers, no user settings get loaded (`--bare` would
+  do the same but refuses a claude.ai login, so it cannot be used);
+- pass `--work-dir` outside any tree that has a project `CLAUDE.md`;
+- `--strict-mcp-config` is always passed (an empty server list for A0/A1),
+  so only `codegraph` is ever attached.
+
+The global `~/.claude/CLAUDE.md` is loaded from the real home directory
+regardless of the above; if the operator has one, it reaches every arm alike
+(symmetric contamination) and must be declared with the results — or moved
+aside for the campaign. After the agent finishes, the primary suite and the
+oracle are injected and run;
 one line per run goes to `results/runs.jsonl` (schema in
 `tools/common/schema.rs`), the transcript to `results/transcripts/`. Runs
 already recorded are skipped, so an interrupted campaign resumes.
@@ -83,8 +107,11 @@ the pipeline, not to produce results.
 ## 3. Verdict: `scorer`
 
 ```
-scorer --runs results/runs.jsonl [--overrides fc_overrides.json] [--expanded]
+scorer --runs results/runs.jsonl [--overrides fc_overrides.json] [--expanded] [--table]
 ```
+
+`--table` also writes `runs_table.md`, the one-row-per-run registration sheet
+of the pilot protocol.
 
 Writes `summary.json` (rates with 95% Wilson intervals per arm, overall / drift
 / no-drift, per seed and pooled) and `verdict.txt`. The decision follows §7

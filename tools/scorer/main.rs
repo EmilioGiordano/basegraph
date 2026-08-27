@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 
-use schema::RunRecord;
+use schema::{Arm, RunRecord};
 use verdict::{Summary, Verdict};
 
 #[derive(Parser)]
@@ -35,6 +35,70 @@ struct Cli {
     /// a grey zone is then NO-GO.
     #[arg(long)]
     expanded: bool,
+    /// Also write `runs_table.md`, one row per run (the pilot's log sheet).
+    #[arg(long)]
+    table: bool,
+}
+
+/// One markdown row per run: the registration sheet of the pilot protocol.
+pub fn render_table(runs: &[RunRecord]) -> String {
+    let mut rows: Vec<&RunRecord> = runs.iter().collect();
+    rows.sort_by(|a, b| {
+        (&a.repo_id, &a.task_id, a.arm, a.seed).cmp(&(&b.repo_id, &b.task_id, b.arm, b.seed))
+    });
+    let mut out = String::from(
+        "| Repo | Task | Arm | Seed | Drift | Oracle passes | Fix passes | Freshness seen (A2) | Read gotchas (A1) | git archaeology | False confidence | Tokens | Time (s) | Notes |\n\
+         |---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+    );
+    for r in rows {
+        let oracle = match r.violation {
+            Some(true) => "no (VIOLATION)",
+            Some(false) => "yes",
+            None => "n/a",
+        };
+        let freshness = if r.arm == Arm::A2 {
+            if r.instrumentation.memory_consulted {
+                if r.instrumentation.memory_statuses.is_empty() {
+                    "consulted, no memories".to_string()
+                } else {
+                    r.instrumentation.memory_statuses.join(",")
+                }
+            } else {
+                "not consulted".to_string()
+            }
+        } else {
+            "-".to_string()
+        };
+        let gotchas = match r.arm {
+            Arm::A1 => {
+                if r.instrumentation.md_read {
+                    "yes"
+                } else {
+                    "no"
+                }
+            }
+            _ => "-",
+        };
+        let yes_no = |b: bool| if b { "yes" } else { "no" };
+        out.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {:.0} | {} |\n",
+            r.repo_id,
+            r.task_id,
+            r.arm.label(),
+            r.seed,
+            yes_no(r.drift),
+            oracle,
+            yes_no(r.fix_pass),
+            freshness,
+            gotchas,
+            yes_no(r.instrumentation.git_archaeology),
+            yes_no(r.false_confidence),
+            r.tokens,
+            r.time_secs,
+            r.notes.join("; ").replace('|', "/")
+        ));
+    }
+    out
 }
 
 pub fn load_runs(text: &str) -> Result<Vec<RunRecord>> {
@@ -141,6 +205,9 @@ fn main() -> Result<()> {
     )?;
     let text = render_verdict(&summary);
     std::fs::write(out.join("verdict.txt"), &text)?;
+    if cli.table {
+        std::fs::write(out.join("runs_table.md"), render_table(&runs))?;
+    }
     print!("{text}");
     Ok(())
 }
@@ -148,7 +215,7 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use schema::{Arm, Instrumentation};
+    use schema::Instrumentation;
 
     fn record(id: &str, fc: bool) -> RunRecord {
         RunRecord {
@@ -189,6 +256,30 @@ mod tests {
         assert!(!runs[0].false_confidence);
         assert!(runs[0].notes[0].contains("overridden"));
         assert!(!runs[1].false_confidence && runs[1].notes.is_empty());
+    }
+
+    #[test]
+    fn table_has_one_row_per_run_in_stable_order() {
+        let mut b = record("b", false);
+        b.arm = Arm::A0;
+        b.violation = Some(true);
+        let mut a = record("a", true);
+        a.instrumentation.memory_consulted = true;
+        a.instrumentation.memory_statuses = vec!["evolved".into()];
+        let table = render_table(&[a, b]);
+        let rows: Vec<&str> = table.lines().skip(2).collect();
+        assert_eq!(rows.len(), 2);
+        assert!(
+            rows[0].starts_with("| repo_01 | task_1 | a0 |"),
+            "{}",
+            rows[0]
+        );
+        assert!(rows[0].contains("no (VIOLATION)"));
+        assert!(
+            rows[1].contains("| a2 |")
+                && rows[1].contains("evolved")
+                && rows[1].contains("| yes |")
+        );
     }
 
     #[test]

@@ -17,10 +17,20 @@ use crate::schema::{Arm, RepoSpec, RunRecord, TaskSpec};
 use crate::transcript;
 use crate::Ctx;
 
-pub const TASK_SUFFIX: &str = "\n\nMake this change in the repository you are in and verify with `cargo test`. Work autonomously and do not ask questions; stop when the change is complete.";
-/// Symmetric coaching for A1 and A2 (go-no-go.md §2); A0 gets nothing.
-pub const COACH_A1: &str = "\n\nThere is a `gotchas.md` in the repository root: consult it for the code you are about to touch before changing it.";
-pub const COACH_A2: &str = "\n\nThere is a memory tool (`recall`): consult it for the code you are about to touch before changing it.";
+/// Per-arm prompt blocks (pilot protocol wording). A0 gets a plain tool
+/// restriction; A1 and A2 get the symmetric "consult your material" line.
+pub const COACH_A0: &str = "Tools allowed: grep, read, glob, git log.\nDo NOT use codegraph, recall, remember, or any markdown file.\n";
+pub const COACH_A1: &str = "Read gotchas.md first. Consult it for what you're about to touch.\n";
+pub const COACH_A2: &str =
+    "Use 'recall' to check what's known about the symbol you're about to touch.\n";
+
+pub fn task_prompt(description: &str, arm: Arm, primary_stem: &str) -> String {
+    format!(
+        "Task: {}\n\n{}Solve the task. Run: cargo test --test {primary_stem}\n",
+        description.trim_end(),
+        coaching(arm)
+    )
+}
 
 /// Keeps experiment material out of `git status` in the clones.
 pub const EXCLUDE: &str = "gotchas.md\ncodegraph.json\ncodegraph-memory.jsonl\ntests/\n";
@@ -43,8 +53,13 @@ const MCP_TOOLS: &[&str] = &["mcp__codegraph__recall", "mcp__codegraph__remember
 pub fn allowed_tools(arm: Arm) -> Vec<String> {
     let mut tools: Vec<String> = BASE_TOOLS.iter().map(|t| t.to_string()).collect();
     for prefix in BASH_PREFIXES {
-        tools.push(format!("Bash({prefix})"));
-        tools.push(format!("Bash({prefix} *)"));
+        // Plain and `rtk`-prefixed forms: the operator's global CLAUDE.md
+        // (loaded for every arm alike) tells agents to prefix commands with
+        // `rtk`, and a denial there only wastes turns.
+        for form in [prefix.to_string(), format!("rtk {prefix}")] {
+            tools.push(format!("Bash({form})"));
+            tools.push(format!("Bash({form} *)"));
+        }
     }
     if arm == Arm::A2 {
         tools.extend(MCP_TOOLS.iter().map(|t| t.to_string()));
@@ -54,7 +69,7 @@ pub fn allowed_tools(arm: Arm) -> Vec<String> {
 
 pub fn coaching(arm: Arm) -> &'static str {
     match arm {
-        Arm::A0 => "",
+        Arm::A0 => COACH_A0,
         Arm::A1 => COACH_A1,
         Arm::A2 => COACH_A2,
     }
@@ -68,7 +83,7 @@ pub fn run_task(
     capture: Option<&CaptureArtifact>,
 ) -> Result<RunRecord> {
     let repo_dir = cx.repo_dir(repo);
-    let work = cx.out.join("work").join(&item.run_id);
+    let work = cx.work.join(&item.run_id);
     if work.exists() {
         std::fs::remove_dir_all(&work)?;
     }
@@ -101,13 +116,22 @@ pub fn run_task(
         }
     };
 
-    let mut prompt = std::fs::read_to_string(repo_dir.join(&task.description))
+    let description = std::fs::read_to_string(repo_dir.join(&task.description))
         .with_context(|| format!("reading {}", task.description))?;
-    prompt.push_str(TASK_SUFFIX);
-    prompt.push_str(coaching(item.arm));
+    let primary_stem = task.primary_test.trim_end_matches(".rs");
+    let prompt = task_prompt(&description, item.arm, primary_stem);
+    let tests_dir = work.join("tests");
+    if cx.expose_primary_test {
+        // The task's acceptance test is part of the request; the oracle is not.
+        files::copy_fresh(
+            &repo_dir.join(&task.primary_test),
+            &tests_dir.join(&task.primary_test),
+        )?;
+    }
 
     let req = AgentRequest {
         phase: Phase::Task,
+        capture_at: cx.capture_at,
         arm: item.arm,
         seed: item.seed,
         cwd: &work,
@@ -137,8 +161,8 @@ pub fn run_task(
     let instrumentation = transcript::instrument(&parsed, item.arm, repo, dirty);
     let false_confidence = transcript::false_confidence(&instrumentation);
 
-    // Ground truth, injected only after the agent is done.
-    let tests_dir = work.join("tests");
+    // Ground truth, (re)injected only after the agent is done: the agent may
+    // have edited an exposed primary test, and never saw the oracle.
     files::copy_fresh(
         &repo_dir.join(&task.primary_test),
         &tests_dir.join(&task.primary_test),
@@ -263,19 +287,21 @@ mod tests {
     }
 
     #[test]
-    fn coaching_is_symmetric_and_absent_for_a0() {
-        assert!(coaching(Arm::A0).is_empty());
-        assert!(coaching(Arm::A1).contains("gotchas.md"));
-        assert!(coaching(Arm::A2).contains("recall"));
-        let strip = |s: &str| {
-            s.replace("`gotchas.md` in the repository root", "X")
-                .replace("memory tool (`recall`)", "X")
-        };
-        assert_eq!(
-            strip(COACH_A1),
-            strip(COACH_A2),
-            "same instruction modulo the tool"
-        );
+    fn prompts_name_the_material_per_arm_and_the_primary_test_for_all() {
+        let a0 = task_prompt("# Feature\n\ndo it\n", Arm::A0, "primary_test_1");
+        let a1 = task_prompt("# Feature\n\ndo it\n", Arm::A1, "primary_test_1");
+        let a2 = task_prompt("# Feature\n\ndo it\n", Arm::A2, "primary_test_1");
+        for p in [&a0, &a1, &a2] {
+            assert!(p.starts_with("Task: # Feature\n\ndo it\n\n"), "{p}");
+            assert!(
+                p.ends_with("Solve the task. Run: cargo test --test primary_test_1\n"),
+                "{p}"
+            );
+        }
+        assert!(a0.contains("Do NOT use codegraph, recall, remember"));
+        assert!(!a0.contains("gotchas.md first") && !a0.contains("'recall'"));
+        assert!(a1.contains("Read gotchas.md first") && !a1.contains("recall"));
+        assert!(a2.contains("Use 'recall'") && !a2.contains("gotchas"));
     }
 
     #[test]

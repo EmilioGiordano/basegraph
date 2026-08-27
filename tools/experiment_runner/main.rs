@@ -29,7 +29,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use clap::Parser;
 
-use agent::{Agent, ClaudeCli, McpServer, Scripted};
+use agent::{Agent, CaptureAt, ClaudeCli, McpServer, Scripted};
 use capture::CaptureArtifact;
 use schema::{Arm, Manifest, RepoSpec};
 
@@ -86,6 +86,18 @@ struct Cli {
     /// Keep the per-run working clones (for inspection).
     #[arg(long)]
     keep_work: bool,
+    /// Where the per-run clones are made (default: <out>/work). Put it
+    /// outside any directory tree that has a CLAUDE.md.
+    #[arg(long)]
+    work_dir: Option<PathBuf>,
+    /// Commit the seeding sessions run at: `c2` (fix applied, infer the
+    /// invariant; pilot protocol) or `c1` (solve the bug, then distill; §4).
+    #[arg(long, default_value = "c2")]
+    capture_at: String,
+    /// Keep the task's primary test hidden from the agent (by default it is
+    /// exposed under tests/ and named in the prompt; the oracle never is).
+    #[arg(long)]
+    hide_primary_test: bool,
     /// Print the plan and exit.
     #[arg(long)]
     dry_run: bool,
@@ -95,6 +107,7 @@ struct Cli {
 pub struct Ctx {
     pub manifest_dir: PathBuf,
     pub out: PathBuf,
+    pub work: PathBuf,
     pub agent: Box<dyn Agent>,
     pub codegraph_bin: PathBuf,
     pub model: Option<String>,
@@ -103,6 +116,8 @@ pub struct Ctx {
     pub time_cap_secs: u64,
     pub token_cap: usize,
     pub keep_work: bool,
+    pub capture_at: CaptureAt,
+    pub expose_primary_test: bool,
 }
 
 impl Ctx {
@@ -194,9 +209,17 @@ fn main() -> Result<()> {
     )?;
     std::fs::create_dir_all(&cli.out)?;
     let out = std::path::absolute(&cli.out)?;
+    let work = match &cli.work_dir {
+        Some(w) => {
+            std::fs::create_dir_all(w)?;
+            std::path::absolute(w)?
+        }
+        None => out.join("work"),
+    };
     let cx = Ctx {
         manifest_dir,
         out,
+        work,
         agent,
         codegraph_bin,
         model: cli.model,
@@ -205,6 +228,9 @@ fn main() -> Result<()> {
         time_cap_secs: cli.time_cap_secs,
         token_cap: cli.token_cap,
         keep_work: cli.keep_work,
+        capture_at: CaptureAt::parse(&cli.capture_at)
+            .with_context(|| format!("--capture-at must be c1 or c2, got `{}`", cli.capture_at))?,
+        expose_primary_test: !cli.hide_primary_test,
     };
 
     let repos = parse_list(&cli.repos);
@@ -221,7 +247,7 @@ fn main() -> Result<()> {
     let done = plan::completed(&runs_path)?;
     let pending: Vec<&plan::PlanItem> = plan.iter().filter(|p| !done.contains(&p.run_id)).collect();
     println!(
-        "agent: {} | plan: {} runs ({} done, {} pending) | model: {} | caps: {} turns, {}s, {} tokens",
+        "agent: {} | plan: {} runs ({} done, {} pending) | model: {} | caps: {} turns, {}s, {} tokens | capture at {} | primary test {}",
         cx.agent.describe(),
         plan.len(),
         done.len(),
@@ -229,7 +255,9 @@ fn main() -> Result<()> {
         cx.model.as_deref().unwrap_or("(cli default)"),
         cx.max_turns,
         cx.time_cap_secs,
-        cx.token_cap
+        cx.token_cap,
+        cx.capture_at.label(),
+        if cx.expose_primary_test { "exposed" } else { "hidden" }
     );
     if cli.dry_run {
         for item in &pending {
