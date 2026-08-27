@@ -10,7 +10,66 @@ use serde::Serialize;
 
 use crate::graph::Graph;
 use crate::memory::model::{AnchorKey, Status};
+use crate::model::Node;
 use crate::parser::sig;
+
+/// Snapshot a node's identity as an anchor.
+pub fn anchor_of(node: &Node) -> AnchorKey {
+    AnchorKey {
+        fqn: node.fqn.clone(),
+        sig_hash: node.sig_hash.clone(),
+        shape_hash: sig::shape_hash(&node.name, &node.signature),
+    }
+}
+
+/// Why a re-anchor confirmation was refused.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ConfirmError {
+    #[error("anchor `{0}` is intact; nothing to re-anchor")]
+    Intact(String),
+    #[error(
+        "anchor `{0}` is orphaned with no candidates; supersede the memory or record a new one"
+    )]
+    NoCandidates(String),
+    #[error("`{chosen}` is not a proposed candidate for `{fqn}` (proposed: {})", .candidates.join(", "))]
+    NotProposed {
+        fqn: String,
+        chosen: String,
+        candidates: Vec<String>,
+    },
+    #[error("candidate `{0}` is no longer in the index")]
+    Missing(String),
+}
+
+/// Confirm a re-anchor: `chosen_fqn` must be one of the candidates `classify`
+/// proposes for `anchor`, or the anchor's own fqn when its interface merely
+/// evolved. Returns the fresh snapshot to store. This is the only way an
+/// uncertain proposal becomes a served anchor; it never happens implicitly.
+pub fn confirm(
+    anchor: &AnchorKey,
+    chosen_fqn: &str,
+    graph: &Graph,
+) -> Result<AnchorKey, ConfirmError> {
+    let proposed = match classify(anchor, graph) {
+        Classification::Intact => return Err(ConfirmError::Intact(anchor.fqn.clone())),
+        Classification::Orphaned => return Err(ConfirmError::NoCandidates(anchor.fqn.clone())),
+        Classification::Evolved => vec![anchor.fqn.clone()],
+        Classification::ReanchorCandidate { candidates, .. } => candidates,
+    };
+    if !proposed.iter().any(|c| c == chosen_fqn) {
+        return Err(ConfirmError::NotProposed {
+            fqn: anchor.fqn.clone(),
+            chosen: chosen_fqn.to_string(),
+            candidates: proposed,
+        });
+    }
+    graph
+        .nodes()
+        .iter()
+        .find(|n| n.fqn == chosen_fqn)
+        .map(anchor_of)
+        .ok_or_else(|| ConfirmError::Missing(chosen_fqn.to_string()))
+}
 
 /// How a re-anchor candidate was found.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -184,11 +243,103 @@ mod tests {
             .iter()
             .find(|n| n.fqn == fqn)
             .expect("symbol present in the before-index");
-        AnchorKey {
-            fqn: node.fqn.clone(),
-            sig_hash: node.sig_hash.clone(),
-            shape_hash: sig::shape_hash(&node.name, &node.signature),
+        anchor_of(node)
+    }
+
+    #[test]
+    fn anchor_of_snapshots_name_bearing_and_name_free_hashes() {
+        let (_d, graph) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
+        let anchor = anchor_for(&graph, "compute");
+        let node = &graph.nodes()[0];
+        assert_eq!(anchor.fqn, "compute");
+        assert_eq!(anchor.sig_hash, node.sig_hash);
+        assert_eq!(
+            anchor.shape_hash,
+            sig::shape_hash("compute", &node.signature)
+        );
+        assert_ne!(anchor.shape_hash, anchor.sig_hash);
+    }
+
+    #[test]
+    fn confirm_accepts_a_proposed_rename() {
+        let (_b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
+        let (_a, after) = build(&[("a.rs", "pub fn evaluate(x: i32) -> i32 { x }")]);
+        let anchor = anchor_for(&before, "compute");
+        assert!(classify(&anchor, &after).is_uncertain());
+
+        let confirmed = confirm(&anchor, "evaluate", &after).expect("proposed candidate");
+        assert_eq!(confirmed, anchor_for(&after, "evaluate"));
+        assert_eq!(classify(&confirmed, &after), Classification::Intact);
+    }
+
+    #[test]
+    fn confirm_accepts_the_evolved_interface_under_the_same_fqn() {
+        let (_b, before) = build(&[("a.rs", "pub fn total(a: i32) -> i32 { a }")]);
+        let (_a, after) = build(&[("a.rs", "pub fn total(a: i64) -> i64 { 0 }")]);
+        let anchor = anchor_for(&before, "total");
+        assert_eq!(classify(&anchor, &after), Classification::Evolved);
+
+        let confirmed = confirm(&anchor, "total", &after).expect("same fqn");
+        assert_eq!(confirmed.fqn, "total");
+        assert_ne!(confirmed.sig_hash, anchor.sig_hash);
+        assert_eq!(classify(&confirmed, &after), Classification::Intact);
+    }
+
+    #[test]
+    fn confirm_rejects_anything_not_proposed() {
+        let (_b, before) = build(&[("a.rs", "pub fn total(a: i32) -> i32 { a }")]);
+        let (_a, after) = build(&[(
+            "a.rs",
+            "pub fn total(a: i64) -> i64 { 0 }\npub fn other(a: i64) -> i64 { 0 }",
+        )]);
+        let anchor = anchor_for(&before, "total");
+        // `other` exists in the index but was never proposed: refused.
+        assert_eq!(
+            confirm(&anchor, "other", &after),
+            Err(ConfirmError::NotProposed {
+                fqn: "total".into(),
+                chosen: "other".into(),
+                candidates: vec!["total".into()],
+            })
+        );
+    }
+
+    #[test]
+    fn confirm_lists_every_candidate_of_an_ambiguous_rename() {
+        let (_b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
+        let (_a, after) = build(&[(
+            "a.rs",
+            "pub fn evaluate(x: i32) -> i32 { x }\n\
+             pub fn assess(x: i32) -> i32 { x }\n\
+             pub fn unrelated(s: String) -> String { s }",
+        )]);
+        let anchor = anchor_for(&before, "compute");
+        match confirm(&anchor, "unrelated", &after) {
+            Err(ConfirmError::NotProposed { candidates, .. }) => {
+                assert_eq!(candidates.len(), 2);
+                assert!(candidates.contains(&"evaluate".to_string()));
+                assert!(candidates.contains(&"assess".to_string()));
+            }
+            other => panic!("expected NotProposed, got {other:?}"),
         }
+        assert!(confirm(&anchor, "assess", &after).is_ok());
+    }
+
+    #[test]
+    fn confirm_rejects_intact_and_orphaned_anchors() {
+        let (_b, before) = build(&[(
+            "a.rs",
+            "pub fn keep(x: i32) -> i32 { x }\npub fn obsolete(token: String) -> Vec<u8> { vec![] }",
+        )]);
+        let (_a, after) = build(&[("a.rs", "pub fn keep(x: i32) -> i32 { x }")]);
+        assert_eq!(
+            confirm(&anchor_for(&before, "keep"), "keep", &after),
+            Err(ConfirmError::Intact("keep".into()))
+        );
+        assert_eq!(
+            confirm(&anchor_for(&before, "obsolete"), "keep", &after),
+            Err(ConfirmError::NoCandidates("obsolete".into()))
+        );
     }
 
     #[test]
