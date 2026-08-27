@@ -1,0 +1,436 @@
+{
+  "version": 1,
+  "seed": 42,
+  "repos": [
+    {
+      "repo_id": "repo_01",
+      "path": "repo_01",
+      "crate_name": "quotaflow",
+      "scenario": "no_panic",
+      "invariant_type": "no_panic",
+      "invariant_text": "`parse_timeout` never panics, whatever the input string: it runs on raw config values while the service boots (`load_timeout`).",
+      "anchor_fqn_c2": "parse_timeout",
+      "anchor_fqn_c3": "parse_timeout",
+      "anchor_file_c2": "src/config.rs",
+      "anchor_file_c3": "src/config.rs",
+      "drift": true,
+      "drift_kind": "signature",
+      "file_count": 25,
+      "commits": {
+        "c1": "692af3cfc3f45b6d667d9b3266787bd8e17cb092",
+        "c2": "af8a4565e4237e55baace7021197cda272b99031",
+        "c3": "a599b1866aea38164035fd1e6d9634f78981132c"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Minutes and hours",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/config.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Fractional seconds",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/config.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_02",
+      "path": "repo_02",
+      "crate_name": "relaycore",
+      "scenario": "return_positivity",
+      "invariant_type": "return_positivity",
+      "invariant_text": "`lead_time_days` always returns at least 1 day (a positive number); `promise_day` adds it to the calendar as an unsigned offset.",
+      "anchor_fqn_c2": "lead_time_days",
+      "anchor_fqn_c3": "lead_time_days",
+      "anchor_file_c2": "src/logistics.rs",
+      "anchor_file_c3": "src/logistics.rs",
+      "drift": false,
+      "drift_kind": null,
+      "file_count": 28,
+      "commits": {
+        "c1": "1e39ee05ea81be69d9e9ba4d7443e8e75bddaed1",
+        "c2": "4bf1147c466b54d4e556509f6c00bcc2087c75d8",
+        "c3": "ec404cfb56c2790f86ac5bcaef97a6e70ff9ba42"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Overnight priority",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/logistics.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Loyalty credit",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/logistics.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_03",
+      "path": "repo_03",
+      "crate_name": "tallyforge",
+      "scenario": "no_side_effect",
+      "invariant_type": "no_side_effect",
+      "invariant_text": "`render_invoice` is pure: it never advances `NEXT_INVOICE`. Previews must not consume invoice numbers because the sequence is audited for gaps.",
+      "anchor_fqn_c2": "render_invoice",
+      "anchor_fqn_c3": "format_invoice",
+      "anchor_file_c2": "src/billing.rs",
+      "anchor_file_c3": "src/billing.rs",
+      "drift": true,
+      "drift_kind": "rename",
+      "file_count": 23,
+      "commits": {
+        "c1": "c2040bea7998769949692baf6a76e6faa4aa4b38",
+        "c2": "204d7a4e743d96d6c8f601efddaa69854caf709d",
+        "c3": "df4dd28f52cfc38a70c68e43579db68e83ed3d7e"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Preview with upcoming number",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/billing.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Month-end statement",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/billing.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_04",
+      "path": "repo_04",
+      "crate_name": "ledgerly",
+      "scenario": "non_empty",
+      "invariant_type": "non_empty",
+      "invariant_text": "`candidate_hosts` never returns an empty list (it falls back to the pool's primary host); `place` indexes the first element.",
+      "anchor_fqn_c2": "candidate_hosts",
+      "anchor_fqn_c3": "candidate_hosts",
+      "anchor_file_c2": "src/placement.rs",
+      "anchor_file_c3": "src/hosts.rs",
+      "drift": true,
+      "drift_kind": "move",
+      "file_count": 24,
+      "commits": {
+        "c1": "e17b9f9818762f8467f255ddceffad14d8bdde84",
+        "c2": "eadaa1eda8b30b082655a0bfe1cb423bc8c12933",
+        "c3": "8bd00570b624355f9de3a7e05a9dfc7babaea55b"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Draining hosts",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/hosts.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Capacity filter",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/hosts.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_05",
+      "path": "repo_05",
+      "crate_name": "beaconhub",
+      "scenario": "idempotence",
+      "invariant_type": "idempotence",
+      "invariant_text": "`normalize_path` is idempotent: normalising an already-normalised path returns it unchanged. Ingest and lookup both normalise, so cache keys must be stable.",
+      "anchor_fqn_c2": "normalize_path",
+      "anchor_fqn_c3": "normalize_path",
+      "anchor_file_c2": "src/paths.rs",
+      "anchor_file_c3": "src/paths.rs",
+      "drift": true,
+      "drift_kind": "duplicate",
+      "file_count": 35,
+      "commits": {
+        "c1": "12127f4b6471626faf64a8388aeecc6af917a468",
+        "c2": "87e9673079b595e500e3aae2234a8e93341b6fb6",
+        "c3": "7f05cf79d6606a495dfe3be1b56c00de8f6f4f1b"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Current-dir segments",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/paths.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Parent segments",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/paths.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_06",
+      "path": "repo_06",
+      "crate_name": "orbitdesk",
+      "scenario": "sorted_output",
+      "invariant_type": "sorted_output",
+      "invariant_text": "`merge_windows` returns the windows sorted by start (and non-overlapping); `first_gap` and the dispatch loop rely on that order.",
+      "anchor_fqn_c2": "merge_windows",
+      "anchor_fqn_c3": "merge_windows",
+      "anchor_file_c2": "src/scheduling.rs",
+      "anchor_file_c3": "src/scheduling.rs",
+      "drift": false,
+      "drift_kind": null,
+      "file_count": 31,
+      "commits": {
+        "c1": "1a22a06c416c025ff7227da6b6d2446d65357acd",
+        "c2": "abd64473e7ad8396bfc88b28b0de6d32bd5ca0c7",
+        "c3": "997f3907480e6b071d7815ce7219136c17e354ab"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Pinned windows",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/scheduling.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Inverted windows",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/scheduling.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_07",
+      "path": "repo_07",
+      "crate_name": "fleetops",
+      "scenario": "commutativity",
+      "invariant_type": "commutativity",
+      "invariant_text": "`affinity_score(a, b) == affinity_score(b, a)`: the discovery board is built once per profile and shown to both parties, so scores must agree in both directions.",
+      "anchor_fqn_c2": "affinity_score",
+      "anchor_fqn_c3": "affinity_score",
+      "anchor_file_c2": "src/matching.rs",
+      "anchor_file_c3": "src/matching.rs",
+      "drift": false,
+      "drift_kind": null,
+      "file_count": 41,
+      "commits": {
+        "c1": "8142138db7798a6e578c40609820e81a192a83f5",
+        "c2": "b706671b4b4e2c13a61d2139fbe94e75220b49e8",
+        "c3": "fba2e773ff395bcaa5313e7d8fba87c34b32f82b"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Blocked profiles",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/matching.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Well-described bonus",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/matching.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_08",
+      "path": "repo_08",
+      "crate_name": "vaultkeeper",
+      "scenario": "precondition",
+      "invariant_type": "precondition",
+      "invariant_text": "`reserve` requires `size > 0` and rejects zero-size reservations (panics). `release` identifies blocks by offset, so zero-size blocks would alias their neighbour.",
+      "anchor_fqn_c2": "reserve",
+      "anchor_fqn_c3": "reserve",
+      "anchor_file_c2": "src/arena.rs",
+      "anchor_file_c3": "src/arena.rs",
+      "drift": true,
+      "drift_kind": "signature",
+      "file_count": 23,
+      "commits": {
+        "c1": "7689985a2cd105ef119f1d7d7bc5e2fb98ef1f7c",
+        "c2": "dac3f342de2ac493f1a045497bb14169c69bac02",
+        "c3": "db8c55da9a359fb645ae7abe189814ee592a7134"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Aligned reservations",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/arena.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Regrow a block",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/arena.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_09",
+      "path": "repo_09",
+      "crate_name": "metricsmith",
+      "scenario": "no_panic",
+      "invariant_type": "no_panic",
+      "invariant_text": "`parse_timeout` never panics, whatever the input string: it runs on raw config values while the service boots (`load_timeout`).",
+      "anchor_fqn_c2": "parse_timeout",
+      "anchor_fqn_c3": "timeout_from_str",
+      "anchor_file_c2": "src/config.rs",
+      "anchor_file_c3": "src/config.rs",
+      "drift": true,
+      "drift_kind": "rename",
+      "file_count": 37,
+      "commits": {
+        "c1": "d64d0400627b7bd25ad9f1194c9abdf57eb51718",
+        "c2": "dcbae5be5ba9a7bfa7ee9c85fa44c6857a10fdcf",
+        "c3": "4cad198805542b0f4c04ddeabdf2f1e6bcd0409f"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Minutes and hours",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/config.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Fractional seconds",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/config.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_10",
+      "path": "repo_10",
+      "crate_name": "shardworks",
+      "scenario": "return_positivity",
+      "invariant_type": "return_positivity",
+      "invariant_text": "`lead_time_days` always returns at least 1 day (a positive number); `promise_day` adds it to the calendar as an unsigned offset.",
+      "anchor_fqn_c2": "lead_time_days",
+      "anchor_fqn_c3": "lead_time_days",
+      "anchor_file_c2": "src/logistics.rs",
+      "anchor_file_c3": "src/transit.rs",
+      "drift": true,
+      "drift_kind": "move",
+      "file_count": 57,
+      "commits": {
+        "c1": "7fe2c922bc3c4423476409abe898ec7aca091104",
+        "c2": "53b73929757548e9b15d4533e95382b37866e054",
+        "c3": "28061d6a6425d4922b930d885360fcbe3a87b0f0"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Overnight priority",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/transit.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Loyalty credit",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/transit.rs"
+        }
+      ]
+    }
+  ]
+}
