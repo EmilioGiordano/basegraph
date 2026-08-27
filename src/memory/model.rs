@@ -32,6 +32,13 @@ pub enum Kind {
     BugHistory,
 }
 
+impl Kind {
+    /// Invariants are the only kind that can become an executable test.
+    pub fn is_invariant(self) -> bool {
+        matches!(self, Kind::Invariant)
+    }
+}
+
 /// What a memory is about: a file path or a symbol's fully-qualified name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Scope {
@@ -86,6 +93,14 @@ mod tests {
                 commit: Some("deadbeef".into()),
                 session: Some("s-42".into()),
             },
+        }
+    }
+
+    #[test]
+    fn only_invariants_are_invariants() {
+        assert!(Kind::Invariant.is_invariant());
+        for kind in [Kind::Decision, Kind::Gotcha, Kind::BugHistory] {
+            assert!(!kind.is_invariant(), "{kind:?}");
         }
     }
 
