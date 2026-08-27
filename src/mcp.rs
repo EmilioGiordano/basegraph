@@ -149,7 +149,7 @@ impl ServerState {
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "codegraph", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source. Use `recall` to fetch what's known about a file or symbol — each memory is tagged with how fresh its anchor is against the current code — and `remember` to record a decision, gotcha, invariant, or past bug anchored to a symbol. When recall reports a memory as evolved or with re-anchor candidates, `reanchor` confirms where it now belongs."
+                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source. Use `recall` to fetch what's known about a file or symbol — each memory is tagged with how fresh its anchor is against the current code — and `remember` to record a decision, gotcha, invariant, or past bug anchored to a symbol. When recall reports a memory as evolved or with re-anchor candidates, `reanchor` confirms where it now belongs, and `supersede` retires a memory that no longer applies."
             }),
         )
     }
@@ -248,6 +248,18 @@ impl ServerState {
                             "chosen_fqn": { "type": "string", "description": "Fully-qualified name to anchor to, taken from recall's candidates" }
                         },
                         "required": ["memory_id", "chosen_fqn"],
+                        "additionalProperties": false
+                    }
+                },
+                {
+                    "name": "supersede",
+                    "description": "Retire a memory that no longer applies. Appends a Superseded event: recall stops serving the memory, while the log keeps its history.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "memory_id": { "type": "string", "description": "Id of the memory to retire" }
+                        },
+                        "required": ["memory_id"],
                         "additionalProperties": false
                     }
                 }
@@ -407,6 +419,19 @@ impl ServerState {
                     memory.anchor.sig_hash,
                     anchor.fqn,
                     anchor.sig_hash
+                ))
+            }
+            "supersede" => {
+                let memory_id = required_str(args, "memory_id")?;
+                let memory = self.find_memory(memory_id)?;
+                self.memory_store
+                    .append(&Event::Superseded {
+                        id: memory.id.clone(),
+                    })
+                    .map_err(|e| ToolError::BadArg(format!("writing memory log: {e}")))?;
+                Ok(format!(
+                    "superseded {} (was anchored to {})",
+                    memory.id.0, memory.anchor.fqn
                 ))
             }
             other => Err(ToolError::Unknown(other.to_string())),
@@ -641,7 +666,57 @@ mod tests {
             .handle(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
             .expect("response");
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 8);
+    }
+
+    #[test]
+    fn test_supersede_missing_arg_is_error() {
+        let mut s = sample_state();
+        let (is_error, text) = call(&mut s, "supersede", json!({}));
+        assert!(is_error);
+        assert!(text.contains("memory_id"), "{text}");
+    }
+
+    #[test]
+    fn test_supersede_unknown_memory_is_error() {
+        let mut s = sample_state();
+        let (is_error, text) = call(&mut s, "supersede", json!({ "memory_id": "nope" }));
+        assert!(is_error);
+        assert!(text.contains("no memory `nope`"), "{text}");
+    }
+
+    #[test]
+    fn test_supersede_hides_the_memory_once() {
+        let dir = TempDir::new();
+        let mut s = state_with_memory(
+            &dir,
+            AnchorKey {
+                fqn: "foo".into(),
+                sig_hash: "aaaabbbbccccdddd".into(),
+                shape_hash: String::new(),
+            },
+        );
+        let (is_error, text) = call(&mut s, "supersede", json!({ "memory_id": "m1" }));
+        assert!(!is_error, "{text}");
+        assert!(text.contains("superseded m1"), "{text}");
+
+        let (_, recalled) = call(&mut s, "recall", json!({ "target": "foo" }));
+        assert!(recalled.contains("\"count\": 0"), "{recalled}");
+
+        // Gone from the fold, so it cannot be superseded or re-anchored again.
+        let (is_error, _) = call(&mut s, "supersede", json!({ "memory_id": "m1" }));
+        assert!(is_error);
+        let (is_error, _) = call(
+            &mut s,
+            "reanchor",
+            json!({ "memory_id": "m1", "chosen_fqn": "foo" }),
+        );
+        assert!(is_error);
+
+        // The log keeps the history.
+        let events = s.memory_store.load_events().expect("events");
+        assert_eq!(events.len(), 2);
+        assert!(matches!(events[1], Event::Superseded { .. }));
     }
 
     /// An invariant memory scoped to and anchored at `anchor.fqn`.
