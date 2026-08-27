@@ -13,10 +13,9 @@ use serde_json::{json, Value};
 use crate::builder::build_graph;
 use crate::cache::{Cache, JsonCache};
 use crate::graph::Graph;
-use crate::memory::anchor::{classify, Classification, ReanchorBasis};
-use crate::memory::model::{AnchorKey, Kind, Memory, MemoryId, Provenance, Scope};
+use crate::memory::anchor::{self, classify, Classification, ReanchorBasis};
+use crate::memory::model::{Kind, Memory, MemoryId, Provenance, Scope};
 use crate::memory::store::{Event, MemoryStore};
-use crate::parser::sig;
 use crate::query;
 use crate::tokens::HeuristicCounter;
 
@@ -150,7 +149,7 @@ impl ServerState {
                 "protocolVersion": version,
                 "capabilities": { "tools": {} },
                 "serverInfo": { "name": "codegraph", "version": env!("CARGO_PKG_VERSION") },
-                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source. Use `recall` to fetch what's known about a file or symbol — each memory is tagged with how fresh its anchor is against the current code — and `remember` to record a decision, gotcha, invariant, or past bug anchored to a symbol."
+                "instructions": "Query a codebase's structure cheaply: `map` to orient, `search` to find a symbol's name, `context` to see its callers/callees/impls/uses, and `show` to read a symbol's source. Use `recall` to fetch what's known about a file or symbol — each memory is tagged with how fresh its anchor is against the current code — and `remember` to record a decision, gotcha, invariant, or past bug anchored to a symbol. When recall reports a memory as evolved or with re-anchor candidates, `reanchor` confirms where it now belongs."
             }),
         )
     }
@@ -236,6 +235,19 @@ impl ServerState {
                             "session": { "type": "string", "description": "Optional provenance: session id" }
                         },
                         "required": ["anchor", "kind", "content"],
+                        "additionalProperties": false
+                    }
+                },
+                {
+                    "name": "reanchor",
+                    "description": "Confirm where a drifted memory now belongs. `chosen_fqn` must be one of the re-anchor candidates recall proposed for it, or the memory's own anchor when recall reported it as evolved (accepting the changed interface). The symbol's current signature is snapshotted and a Reanchored event is appended; nothing is ever re-anchored implicitly.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "memory_id": { "type": "string", "description": "Id of the memory to re-anchor" },
+                            "chosen_fqn": { "type": "string", "description": "Fully-qualified name to anchor to, taken from recall's candidates" }
+                        },
+                        "required": ["memory_id", "chosen_fqn"],
                         "additionalProperties": false
                     }
                 }
@@ -346,11 +358,7 @@ impl ServerState {
                             "no symbol '{fqn}' in the current index; the anchor must exist"
                         ))
                     })?;
-                let anchor = AnchorKey {
-                    fqn: node.fqn.clone(),
-                    sig_hash: node.sig_hash.clone(),
-                    shape_hash: sig::shape_hash(&node.name, &node.signature),
-                };
+                let anchor = anchor::anchor_of(node);
                 let count = self
                     .memory_store
                     .load_events()
@@ -380,8 +388,43 @@ impl ServerState {
                     .map_err(|e| ToolError::BadArg(format!("writing memory log: {e}")))?;
                 Ok(format!("remembered {} anchored to {fqn}", id.0))
             }
+            "reanchor" => {
+                let memory_id = required_str(args, "memory_id")?;
+                let chosen = required_str(args, "chosen_fqn")?;
+                let memory = self.find_memory(memory_id)?;
+                let anchor = anchor::confirm(&memory.anchor, chosen, &self.graph)
+                    .map_err(|e| ToolError::BadArg(format!("cannot reanchor {memory_id}: {e}")))?;
+                self.memory_store
+                    .append(&Event::Reanchored {
+                        id: memory.id.clone(),
+                        anchor: anchor.clone(),
+                    })
+                    .map_err(|e| ToolError::BadArg(format!("writing memory log: {e}")))?;
+                Ok(format!(
+                    "reanchored {} from {} @ {} to {} @ {}",
+                    memory.id.0,
+                    memory.anchor.fqn,
+                    memory.anchor.sig_hash,
+                    anchor.fqn,
+                    anchor.sig_hash
+                ))
+            }
             other => Err(ToolError::Unknown(other.to_string())),
         }
+    }
+
+    /// The current memory with this id; superseded ids are gone from the fold.
+    fn find_memory(&self, id: &str) -> Result<Memory, ToolError> {
+        self.memory_store
+            .materialize()
+            .map_err(|e| ToolError::BadArg(format!("reading memory log: {e}")))?
+            .into_iter()
+            .find(|m| m.id.0 == id)
+            .ok_or_else(|| {
+                ToolError::BadArg(format!(
+                    "no memory `{id}` (unknown id, or already superseded)"
+                ))
+            })
     }
 }
 
@@ -403,6 +446,12 @@ fn content_result(id: Value, text: &str, is_error: bool) -> Value {
         id,
         json!({ "content": [ { "type": "text", "text": text } ], "isError": is_error }),
     )
+}
+
+fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError> {
+    args.get(key)
+        .and_then(Value::as_str)
+        .ok_or_else(|| ToolError::BadArg(format!("missing required argument: {key}")))
 }
 
 fn arg_usize(args: &Value, key: &str, default: usize) -> usize {
@@ -513,6 +562,7 @@ fn write_message(out: &mut impl Write, msg: &Value) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::memory::model::AnchorKey;
     use crate::model::{Node, NodeId, NodeKind};
     use std::sync::atomic::{AtomicU32, Ordering};
 
@@ -591,7 +641,151 @@ mod tests {
             .handle(&json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }))
             .expect("response");
         let tools = resp["result"]["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
+    }
+
+    /// An invariant memory scoped to and anchored at `anchor.fqn`.
+    fn anchored_memory(anchor: AnchorKey) -> Memory {
+        Memory {
+            id: MemoryId("m1".into()),
+            content: "foo must stay pure".into(),
+            scope: Scope::Symbol(anchor.fqn.clone()),
+            anchor,
+            kind: Kind::Invariant,
+            provenance: Provenance::default(),
+        }
+    }
+
+    fn state_with_memory(dir: &TempDir, anchor: AnchorKey) -> ServerState {
+        let s = state_at(dir.0.clone());
+        s.memory_store
+            .append(&Event::Created {
+                memory: anchored_memory(anchor),
+            })
+            .expect("append");
+        s
+    }
+
+    fn call(s: &mut ServerState, name: &str, arguments: Value) -> (bool, String) {
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 99, "method": "tools/call",
+                "params": { "name": name, "arguments": arguments }
+            }))
+            .expect("response");
+        let is_error = resp["result"]["isError"].as_bool().expect("isError");
+        let text = resp["result"]["content"][0]["text"]
+            .as_str()
+            .expect("text")
+            .to_string();
+        (is_error, text)
+    }
+
+    #[test]
+    fn test_reanchor_missing_args_is_error() {
+        let mut s = sample_state();
+        let (is_error, text) = call(&mut s, "reanchor", json!({ "memory_id": "m1" }));
+        assert!(is_error);
+        assert!(text.contains("chosen_fqn"), "{text}");
+    }
+
+    #[test]
+    fn test_reanchor_unknown_memory_is_error() {
+        let mut s = sample_state();
+        let (is_error, text) = call(
+            &mut s,
+            "reanchor",
+            json!({ "memory_id": "nope", "chosen_fqn": "foo" }),
+        );
+        assert!(is_error);
+        assert!(text.contains("no memory `nope`"), "{text}");
+    }
+
+    #[test]
+    fn test_reanchor_intact_memory_is_error() {
+        let dir = TempDir::new();
+        let mut s = state_with_memory(
+            &dir,
+            AnchorKey {
+                fqn: "foo".into(),
+                sig_hash: "aaaabbbbccccdddd".into(),
+                shape_hash: String::new(),
+            },
+        );
+        let (is_error, text) = call(
+            &mut s,
+            "reanchor",
+            json!({ "memory_id": "m1", "chosen_fqn": "foo" }),
+        );
+        assert!(is_error);
+        assert!(text.contains("intact"), "{text}");
+    }
+
+    #[test]
+    fn test_reanchor_rejects_an_unproposed_fqn() {
+        let dir = TempDir::new();
+        // Anchored to a symbol that is gone; `foo` carries the same signature
+        // hash, so recall proposes it — and only it.
+        let mut s = state_with_memory(
+            &dir,
+            AnchorKey {
+                fqn: "bar".into(),
+                sig_hash: "aaaabbbbccccdddd".into(),
+                shape_hash: String::new(),
+            },
+        );
+        let (is_error, text) = call(
+            &mut s,
+            "reanchor",
+            json!({ "memory_id": "m1", "chosen_fqn": "somewhere" }),
+        );
+        assert!(is_error);
+        assert!(text.contains("not a proposed candidate"), "{text}");
+        assert!(text.contains("foo"), "{text}");
+        // Nothing was written.
+        let (_, recalled) = call(&mut s, "recall", json!({ "target": "bar" }));
+        assert!(recalled.contains("\"status\": \"orphaned\""), "{recalled}");
+    }
+
+    #[test]
+    fn test_reanchor_confirms_a_candidate_and_recall_follows() {
+        let dir = TempDir::new();
+        let mut s = state_with_memory(
+            &dir,
+            AnchorKey {
+                fqn: "bar".into(),
+                sig_hash: "aaaabbbbccccdddd".into(),
+                shape_hash: String::new(),
+            },
+        );
+        let (_, recalled) = call(&mut s, "recall", json!({ "target": "bar" }));
+        assert!(recalled.contains("\"uncertain\": true"), "{recalled}");
+        assert!(recalled.contains("\"foo\""), "{recalled}");
+
+        let (is_error, text) = call(
+            &mut s,
+            "reanchor",
+            json!({ "memory_id": "m1", "chosen_fqn": "foo" }),
+        );
+        assert!(!is_error, "{text}");
+        assert!(text.contains("reanchored m1 from bar"), "{text}");
+
+        // The memory is now about `foo`, served as intact, and no longer
+        // found under the old name.
+        let (_, recalled) = call(&mut s, "recall", json!({ "target": "foo" }));
+        assert!(recalled.contains("\"count\": 1"), "{recalled}");
+        assert!(recalled.contains("\"status\": \"intact\""), "{recalled}");
+        let (_, old) = call(&mut s, "recall", json!({ "target": "bar" }));
+        assert!(old.contains("\"count\": 0"), "{old}");
+
+        // Confirming again has nothing to do.
+        let (is_error, text) = call(
+            &mut s,
+            "reanchor",
+            json!({ "memory_id": "m1", "chosen_fqn": "foo" }),
+        );
+        assert!(is_error);
+        assert!(text.contains("intact"), "{text}");
     }
 
     #[test]
