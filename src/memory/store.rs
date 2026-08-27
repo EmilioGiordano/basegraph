@@ -10,15 +10,15 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::memory::model::{AnchorKey, Memory, MemoryId};
+use crate::memory::model::{AnchorKey, Memory, MemoryId, Scope};
 
 const EVENT_VERSION: u32 = 1;
 const MEMORY_LOG_FILE: &str = "codegraph-memory.jsonl";
 
 /// A single mutation to the memory log.
 ///
-/// `Reanchored` and `Superseded` are reserved for the future re-anchor
-/// confirmation write-path; nothing emits them yet (only `Created` is written).
+/// `Created` is written by `remember`; `Reanchored` by a confirmed `reanchor`
+/// (never implicitly by the classifier); `Superseded` by `supersede`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Event {
     Created { memory: Memory },
@@ -127,6 +127,11 @@ fn fold(events: Vec<Event>) -> Vec<Memory> {
             Event::Reanchored { id, anchor } => {
                 if let Some(&i) = index.get(&id) {
                     if let Some(m) = &mut slots[i] {
+                        // A memory scoped to the symbol it is anchored to stays
+                        // about that symbol when it is confirmed under a new fqn.
+                        if matches!(&m.scope, Scope::Symbol(s) if *s == m.anchor.fqn) {
+                            m.scope = Scope::Symbol(anchor.fqn.clone());
+                        }
                         m.anchor = anchor;
                     }
                 }
@@ -250,6 +255,69 @@ mod tests {
         let mems = store.materialize().expect("materialize");
         assert_eq!(mems.len(), 1);
         assert_eq!(mems[0].anchor.fqn, "b::f");
+        // The symbol scope follows the confirmed anchor.
+        assert_eq!(mems[0].scope, Scope::Symbol("b::f".into()));
+    }
+
+    #[test]
+    fn reanchored_leaves_other_scopes_alone() {
+        let dir = TempDir::new();
+        let store = MemoryStore::new(&dir.0);
+        let mut file_scoped = memory("m1", "a::f", "h1");
+        file_scoped.scope = Scope::File("src/a.rs".into());
+        let mut other_symbol = memory("m2", "a::g", "h2");
+        other_symbol.scope = Scope::Symbol("a::unrelated".into());
+        for memory in [file_scoped, other_symbol] {
+            store.append(&Event::Created { memory }).expect("append");
+        }
+        for (id, fqn) in [("m1", "b::f"), ("m2", "b::g")] {
+            store
+                .append(&Event::Reanchored {
+                    id: MemoryId(id.into()),
+                    anchor: AnchorKey {
+                        fqn: fqn.into(),
+                        sig_hash: "h".into(),
+                        shape_hash: String::new(),
+                    },
+                })
+                .expect("reanchor");
+        }
+
+        let mems = store.materialize().expect("materialize");
+        assert_eq!(mems[0].anchor.fqn, "b::f");
+        assert_eq!(mems[0].scope, Scope::File("src/a.rs".into()));
+        assert_eq!(mems[1].anchor.fqn, "b::g");
+        assert_eq!(mems[1].scope, Scope::Symbol("a::unrelated".into()));
+    }
+
+    #[test]
+    fn events_for_unknown_ids_are_ignored() {
+        let dir = TempDir::new();
+        let store = MemoryStore::new(&dir.0);
+        store
+            .append(&Event::Superseded {
+                id: MemoryId("ghost".into()),
+            })
+            .expect("supersede");
+        store
+            .append(&Event::Reanchored {
+                id: MemoryId("ghost".into()),
+                anchor: AnchorKey {
+                    fqn: "x".into(),
+                    sig_hash: "h".into(),
+                    shape_hash: String::new(),
+                },
+            })
+            .expect("reanchor");
+        store
+            .append(&Event::Created {
+                memory: memory("m1", "a::f", "h1"),
+            })
+            .expect("append");
+
+        let mems = store.materialize().expect("materialize");
+        assert_eq!(mems.len(), 1);
+        assert_eq!(mems[0].id, MemoryId("m1".into()));
     }
 
     #[test]
