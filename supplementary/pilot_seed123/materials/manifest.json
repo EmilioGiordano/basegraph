@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "seed": 123,
+  "repos": [
+    {
+      "repo_id": "repo_01",
+      "path": "repo_01",
+      "crate_name": "orbitdesk",
+      "scenario": "no_side_effect",
+      "invariant_type": "no_side_effect",
+      "invariant_text": "`render_invoice` is pure: it never advances `NEXT_INVOICE`. Previews must not consume invoice numbers because the sequence is audited for gaps.",
+      "anchor_fqn_c2": "render_invoice",
+      "anchor_fqn_c3": "render_invoice",
+      "anchor_file_c2": "src/billing.rs",
+      "anchor_file_c3": "src/billing.rs",
+      "drift": false,
+      "drift_kind": null,
+      "file_count": 47,
+      "commits": {
+        "c1": "af8cc592eee70039cf9942bed599dd5db184a485",
+        "c2": "2a108d56df6bfeb996b822287baa5225c43991e0",
+        "c3": "4821cff3b6b3c4dabc8fd9ae6e458fa3de19b91c"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Preview with upcoming number",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/billing.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Month-end statement",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/billing.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_02",
+      "path": "repo_02",
+      "crate_name": "quotaflow",
+      "scenario": "sorted_output",
+      "invariant_type": "sorted_output",
+      "invariant_text": "`merge_windows` returns the windows sorted by start (and non-overlapping); `first_gap` and the dispatch loop rely on that order.",
+      "anchor_fqn_c2": "merge_windows",
+      "anchor_fqn_c3": "merge_windows",
+      "anchor_file_c2": "src/scheduling.rs",
+      "anchor_file_c3": "src/scheduling.rs",
+      "drift": true,
+      "drift_kind": "duplicate",
+      "file_count": 22,
+      "commits": {
+        "c1": "22465d6f88c3138782502a1d54890d30ede58e59",
+        "c2": "15c831d501903b96d475d2170425df6b700fccef",
+        "c3": "c4a915bbb28d7c9d31794d69eb4b37ff79687c30"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Pinned windows",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/scheduling.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Inverted windows",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/scheduling.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_03",
+      "path": "repo_03",
+      "crate_name": "beaconhub",
+      "scenario": "commutativity",
+      "invariant_type": "commutativity",
+      "invariant_text": "`affinity_score(a, b) == affinity_score(b, a)`: the discovery board is built once per profile and shown to both parties, so scores must agree in both directions.",
+      "anchor_fqn_c2": "affinity_score",
+      "anchor_fqn_c3": "affinity_score",
+      "anchor_file_c2": "src/matching.rs",
+      "anchor_file_c3": "src/matching.rs",
+      "drift": true,
+      "drift_kind": "signature",
+      "file_count": 40,
+      "commits": {
+        "c1": "f38f10f202be230b55d500acb0c5a1130e44f3a0",
+        "c2": "c127cb875e9004207411174423a6221c498ce2c0",
+        "c3": "3a09474258c7e437d8ddf75e56f69cad330f67eb"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Blocked profiles",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/matching.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Well-described bonus",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/matching.rs"
+        }
+      ]
+    }
+  ]
+}
