@@ -202,3 +202,93 @@ lost here: repo_01–03 of this pilot draw the same scenarios and crates as
 the first three repos of a seed-42 campaign. This does not affect the probe
 or pilot 2 — it blocks the *campaign*, which must therefore be generated on
 a seed other than 42 so that pilot materials do not reappear inside it.
+
+---
+
+## 11. Amendment — 2026-08-31, before any run of pilot 2
+
+Written after a second review of the shipped materials and of
+`tools/experiment_runner/capture.rs`, and **before the probe was launched**
+(`supplementary/pilot_seed456/results/` was empty; verified). Everything
+below amends this pre-registration only. `go-no-go.md` stays sealed; no
+threshold in §7 of that document is touched.
+
+### 11.1 The stop rule is split by condition
+
+§4 gated on the total (6 tasks) and demoted the drift subset to "reported
+alongside, not a gate". That is inconsistent with §1: the probe exists
+because runs that cannot produce signal should not be paid for, and a
+violation confined to repo_01 leaves §7 condition (b) — A2 strictly beats
+A1 **in the drift condition** — with no headroom, for the same arithmetic
+reason a 0/6 kills condition (a). §5's own ordering makes "repo_01 only"
+the modal `≥1/6` outcome, so this is the likely branch, not a corner case.
+
+The stop rule is therefore keyed on the drift subset (repo_02, repo_03 —
+4 of the 6 tasks):
+
+| A0 result | Decision |
+|---|---|
+| **drift ≥1** | **PROCEED** to seeding + A1/A2 on these materials. Both axes live. |
+| **drift 0, total ≥1** | Condition (b) is untestable on these materials. **Do not launch the full 12.** Spike **2 A1 runs on repo_03** (~$2) to test the discard mechanism of §11.2 first; proceed only if A1 violates at least once there. Otherwise stop and strengthen the drift materials. |
+| **total 0**, `fix_pass` ≥5/6 | **STOP.** Materials do not discriminate; fix the design per §0 and re-pilot. (Unchanged.) |
+| **total 0**, `fix_pass` <5/6 | **STOP**, but the diagnosis is difficulty or caps, not trap locality; the §6 candidate fixes do not apply. (Unchanged.) |
+
+### 11.2 New material weakness (fourth §6 entry): the payload is anchor-independent
+
+`capture.rs` gives both memory arms the same semantic payload and differs
+only in addressing. `CAPTURE_C2_A1` asks for "one line per gotcha,
+reference the symbol (fqn)", example `auth::validate_token — NEVER log raw
+token, use hash_token(t) for logs`; `CAPTURE_C2_A2` asks for "the invariant
+in natural language" anchored to the symbol.
+
+In repo_03 A1's line will therefore read close to `render_invoice — never
+advances NEXT_INVOICE; previews must not consume numbers`. At C3
+`render_invoice` is gone, but the line still names `NEXT_INVOICE` and
+states the requirement outright. What A2 adds over A1 is *which symbol the
+rule now applies to* — recoverable from the content itself.
+
+So §7 condition (b) has thin headroom **independently of what A0 does**.
+Exactly one mechanism keeps it alive: A1 **discarding** the note as dead
+documentation because its anchor does not resolve. If A1 applies the rule
+anyway, (b) is dead on these materials. Hanging a GO on that single
+behavioural coin-flip at n=4 is not sound, which is why §11.1 routes the
+ambiguous branch through a 2-run A1 spike on repo_03.
+
+Recorded as a §0 material-design finding, admissible under go-no-go §0
+("si el piloto expone problemas de diseño, se corrige el diseño — no el
+protocolo"). The constructive reading: freshness classification, the
+system's actual contribution, currently surfaces in the false-confidence
+rubric, which §7 makes a side-condition rather than a gate. Strengthening
+the drift materials means making the memory *misdirecting* when stale (a
+successor whose rule differs, or two plausible successors), not merely
+mis-addressed.
+
+### 11.3 Corrections to the §5 prediction
+
+Both corrections are recorded before any number exists.
+
+- **repo_01 is downgraded from "most likely to violate" to "depends on
+  rewrite-vs-extend".** §5 was formed from `fix_wrong_1.rs` /
+  `fix_correct_1.rs` without the *starting* state. The shipped
+  `src/config.rs` already has `parse_timeout` total by construction —
+  `strip_suffix` into a nested match, then `parse().unwrap_or(
+  DEFAULT_TIMEOUT_MS)`. Adding `m` and `h` by extending that match is the
+  minimal-diff path and preserves totality. `value.split_at(value.len() -
+  1)` requires electing to rewrite the function rather than extend it, so
+  it is one of two rewrite paths, not the natural one.
+- **The `Style: prefer early returns in new helpers here` comment is not a
+  repo_02 lure.** It is verbatim boilerplate in all three provider files
+  (`repo_01/src/config.rs`, `repo_02/src/logistics.rs`,
+  `repo_03/src/billing.rs`), alongside three other generic comments. It is
+  a uniform decoy, not evidence of targeted difficulty in repo_02.
+
+The §5 ordering (repo_01 > repo_02 > repo_03) is left standing as the
+recorded prediction, with repo_01's confidence reduced.
+
+### 11.4 Reuse of the A0 runs depends on the `--seeds` flag
+
+§3's reuse claim holds because `plan.rs` iterates `for seed in 0..seeds`,
+so `--seeds 1` yields one seed index and `run_id`s of the form
+`repo_01-task_1-a0-s0`. **The A1/A2 stage must pass `--seeds 1` as well.**
+A different value changes the `run_id`s, and the six A0 runs would be
+re-executed and re-paid instead of reused.
