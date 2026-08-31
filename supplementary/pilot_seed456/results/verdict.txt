@@ -1,0 +1,9 @@
+GREY
+
+runs: 6 | tasks: 6 (4 drift) | seeds: [0] | decision on seed 0
+- not decidable: some arm or condition has no runs
+
+violation rate (seed 0):
+  a0: 1/6 = 0.17 [0.03, 0.56]  drift 1/4  false-confidence 0  cap 0  material-used 0
+
+next: one expansion to 3 tasks per repo, then re-score with --expanded
