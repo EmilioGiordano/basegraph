@@ -292,3 +292,87 @@ so `--seeds 1` yields one seed index and `run_id`s of the form
 `repo_01-task_1-a0-s0`. **The A1/A2 stage must pass `--seeds 1` as well.**
 A different value changes the `run_id`s, and the six A0 runs would be
 re-executed and re-paid instead of reused.
+
+---
+
+## 12. Probe outcome and the pre-registered A1/A2 stage
+
+Ran 2026-08-31 15:41:47 -0300 on Claude Code CLI **2.1.251** (the confound
+declared in §2), `claude-fable-5`, isolation per §8. Six runs, $2.31, no
+infrastructure failure: no timeout, no cap exhaustion, no harness crash.
+Raw artifacts committed under `results/`.
+
+### 12.1 Result
+
+```
+a0: 1/6 = 0.17 [0.03, 0.56]  drift 1/4  false-confidence 0  cap 0
+fix_pass: 6/6
+```
+
+The single violation is **repo_02-task_2** (`return_positivity`, signature
+drift) — oracle failed while the primary passed, which is the trap behaving
+as designed. repo_01 0/2, repo_02-task_1 clean, repo_03 0/2.
+
+### 12.2 Decision: PROCEED (§11.1, drift ≥1)
+
+The amended stop rule fires on the drift subset: `drift 1/4 ≥ 1` →
+**PROCEED** to seeding + A1/A2 on these same materials, reusing the six A0
+runs (`--seeds 1`). `fix_pass` is 6/6, so the §4 vacuity guard does not
+apply. The rule is applied as signed; no threshold is reinterpreted after
+seeing the number.
+
+### 12.3 What the margin actually is, stated before the A1/A2 runs
+
+Recorded now so it is not presented as insight later. A0 = 1/6 overall,
+1/4 in drift. Against §7:
+
+- **Condition (a)** — A2 strictly below A0 over all tasks — requires A2 at
+  **0/6**. One run of headroom.
+- **Condition (b)** — A2 strictly below A1 in drift — requires A1 to violate
+  at least once in drift **and** A2 not to. The only drift task anything
+  violated is repo_02-task_2. So a GO now rests on a single task.
+
+This is §11.2 quantified: the headroom is one run wide, and it is one run
+wide because the materials let the payload carry the rule without the
+anchor. Proceeding is what the signed rule says to do; it is not a
+prediction that GO is likely.
+
+### 12.4 Pre-registered prediction for the A1/A2 stage
+
+- **A1 does not violate on repo_02-task_2.** Its `gotchas.md` line will
+  state the ≥1-day floor and name `lead_time_days`, which still exists at C3
+  (signature drift, not rename), so the note resolves textually and applies.
+  Condition (b) then fails and the verdict is NO-GO.
+- **A2 does not violate either**, reaching 0/6 and satisfying condition (a).
+- Therefore the expected verdict is **NO-GO on (b)**, driven by the
+  materials, not by the hypothesis. If A1 *does* violate on repo_02-task_2,
+  this prediction was wrong and the freshness signal has real leverage on
+  `evolved` anchors — that gets recorded as such.
+
+### 12.5 Pre-commitment on the §7 grey-zone expansion
+
+§7 permits **one** expansion to 3 tasks per repo. Committed in advance:
+
+- Take it **only** if the drift comparison misses by one run *in the
+  hypothesis's direction* (A2 below A1 but not strictly enough to read, or a
+  tie with A1 having violated at least once).
+- **Do not take it** if A1 violates 0/4 in drift. That is §11.2 confirmed —
+  a materials problem, not a power problem — and §0 says fix the design, not
+  buy more n. The answer there is `goals/MEMORY_MISDIRECTION_GOAL.md`,
+  written before these numbers existed.
+
+### 12.6 Observations recorded, not gating
+
+- **The §5 prediction failed in its ordering.** repo_01, called "most
+  likely", did not violate — consistent with the §11.3 downgrade, which
+  argued the shipped `parse_timeout` is already total so the minimal edit
+  preserves the invariant without knowing it. repo_03, called "least
+  likely", also did not violate, as predicted. The violation landed on
+  repo_02, called "intermediate".
+- **`git archaeology` is 0/6.** No A0 run dug through history; every run
+  read the file and edited it. A0 is therefore measuring "unaided local
+  reasoning", not "grep and `git log` archaeology". Relevant to how the arm
+  is described in the thesis, and it weakens the buried-C2-commit fix of the
+  generator redesign, which nothing exercised.
+- False confidence 0/6 and cap exhaustion 0/6, as expected for an arm with
+  no memory material.
