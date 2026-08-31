@@ -1,7 +1,7 @@
 # HANDOVER — CodeGraph Thesis Project
 
 **Fecha:** 2026-08-31
-**Rama:** `feat/generator-redesign` (8 commits sobre `main`)
+**Rama:** `feat/generator-redesign` (por delante de `main`)
 **Estado:** infra completa y verificada; piloto 2 en la compuerta del probe A0,
 sin ejecutar todavía.
 
