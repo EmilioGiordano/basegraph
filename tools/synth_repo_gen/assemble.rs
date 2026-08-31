@@ -92,14 +92,29 @@ const NOISE_MESSAGES: &[&str] = &[
     "feat: expose {name} search helper",
     "chore: extend {name} coverage",
 ];
+const PROVIDER_NOISE_MESSAGES: &[&str] = &[
+    "docs: annotate {name} for the hardening pass",
+    "chore: leave review notes in {name}",
+    "docs: record ownership and style notes in {name}",
+    "chore: comment pass over {name}",
+    "docs: note compat expectations in {name}",
+];
 
 pub const MIN_FILLER: usize = 18;
 pub const MAX_FILLER: usize = 55;
 
 #[derive(Debug, Clone)]
 pub struct NoiseSpec {
-    pub module: usize,
+    pub target: NoiseTarget,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoiseTarget {
+    /// A cosmetic comment pass over the anchored (provider) module.
+    Provider,
+    /// An extra helper in one filler module.
+    Filler(usize),
 }
 
 #[derive(Debug, Clone)]
@@ -131,6 +146,12 @@ impl RepoPlan {
             Some(DriftKind::Rename) => p.fn_name = self.scenario.fn_renamed.into(),
             Some(DriftKind::Move) => p.module = self.scenario.module_moved.into(),
             Some(DriftKind::Signature) => p.arg = self.scenario.arg_renamed.into(),
+            // Delete: the old symbol is gone for good — its successor has a
+            // new name AND a new parameter, so no hash matches the anchor.
+            Some(DriftKind::Delete) => {
+                p.fn_name = self.scenario.fn_renamed.into();
+                p.arg = self.scenario.arg_renamed.into();
+            }
             Some(DriftKind::Duplicate) | None => {}
         }
         p
@@ -175,7 +196,8 @@ pub fn plan(
             };
             let mut repo_rng = rng.fork(&repo_id);
             let filler = plan_filler(&mut repo_rng, &scenario);
-            let (noise_before, noise_after) = plan_noise(&mut repo_rng, &filler, noise_commits);
+            let (noise_before, noise_after) =
+                plan_noise(&mut repo_rng, &scenario, &filler, noise_commits);
             let body_change_module = repo_rng.below(filler.len());
             RepoPlan {
                 repo_id,
@@ -196,7 +218,7 @@ fn plan_filler(rng: &mut Rng, scenario: &Scenario) -> Vec<FillerSpec> {
     let reserved: BTreeSet<String> = [
         scenario.module,
         scenario.module_moved,
-        "legacy",
+        scenario.consumer_module,
         "lib",
         "main",
     ]
@@ -245,22 +267,39 @@ fn plan_filler(rng: &mut Rng, scenario: &Scenario) -> Vec<FillerSpec> {
     specs
 }
 
+/// Most noise lands between C1 and C2, and at least every other one of those
+/// commits touches the provider file itself, so the fix ends up buried in the
+/// anchored module's own history (the findability knob of go-no-go.md §3).
 fn plan_noise(
     rng: &mut Rng,
+    scenario: &Scenario,
     filler: &[FillerSpec],
     total: usize,
 ) -> (Vec<NoiseSpec>, Vec<NoiseSpec>) {
-    let mut all: Vec<NoiseSpec> = (0..total)
-        .map(|_| {
+    let mut make = |provider: bool| {
+        if provider {
+            let message = rng
+                .pick(PROVIDER_NOISE_MESSAGES)
+                .replace("{name}", scenario.module);
+            NoiseSpec {
+                target: NoiseTarget::Provider,
+                message,
+            }
+        } else {
             let module = rng.below(filler.len());
             let message = rng
                 .pick(NOISE_MESSAGES)
                 .replace("{name}", &filler[module].name);
-            NoiseSpec { module, message }
-        })
-        .collect();
-    let after = all.split_off(total / 2);
-    (all, after)
+            NoiseSpec {
+                target: NoiseTarget::Filler(module),
+                message,
+            }
+        }
+    };
+    let after_count = total / 5;
+    let before: Vec<NoiseSpec> = (0..total - after_count).map(|i| make(i % 2 == 0)).collect();
+    let after: Vec<NoiseSpec> = (0..after_count).map(|_| make(false)).collect();
+    (before, after)
 }
 
 const EXCLUDE: &str = "# ground truth and experiment material, never committed\n\
@@ -273,17 +312,19 @@ fn tree(
     filler: &[FillerSpec],
     p: &Params,
     stage: Stage,
-    legacy: bool,
+    provider_noise: usize,
 ) -> BTreeMap<String, String> {
     let s = &plan.scenario;
     let mut files = BTreeMap::new();
-    let mut modules: Vec<String> = vec![p.module.clone()];
-    files.insert(p.anchor_file(), render::anchor_module(s, stage, p));
-    if legacy {
-        let name = render::legacy_module_name(&p.module);
-        files.insert(format!("src/{name}.rs"), render::legacy_module(s, p));
-        modules.push(name);
-    }
+    let mut modules: Vec<String> = vec![p.module.clone(), s.consumer_module.to_string()];
+    files.insert(
+        p.anchor_file(),
+        render::anchor_module(s, stage, p, provider_noise),
+    );
+    files.insert(
+        format!("src/{}.rs", s.consumer_module),
+        render::consumer_module(s, p),
+    );
     for f in filler {
         files.insert(f.file(), render::filler_module(f, s, p));
         modules.push(f.name.clone());
@@ -338,31 +379,39 @@ pub fn build(plan: &RepoPlan, out_root: &Path) -> Result<RepoSpec> {
     let mut filler = plan.filler.clone();
     let mut index = 0;
 
+    let mut provider_noise = 0usize;
     let mut previous = BTreeMap::new();
-    let current = tree(plan, &filler, &p1, Stage::C1, false);
+    let current = tree(plan, &filler, &p1, Stage::C1, provider_noise);
     write_tree(&dir, &previous, &current)?;
     let c1 = git::commit_all(&dir, s.commit_c1, index)?;
     previous = current;
 
     for noise in &plan.noise_before {
         index += 1;
-        filler[noise.module].extra_fns += 1;
-        let current = tree(plan, &filler, &p1, Stage::C1, false);
+        match noise.target {
+            NoiseTarget::Provider => provider_noise += 1,
+            NoiseTarget::Filler(module) => filler[module].extra_fns += 1,
+        }
+        let current = tree(plan, &filler, &p1, Stage::C1, provider_noise);
         write_tree(&dir, &previous, &current)?;
         git::commit_all(&dir, &noise.message, index)?;
         previous = current;
     }
 
+    // The fix commit, buried in the noise the loop above laid down.
     index += 1;
-    let current = tree(plan, &filler, &p1, Stage::C2, false);
+    let current = tree(plan, &filler, &p1, Stage::C2, provider_noise);
     write_tree(&dir, &previous, &current)?;
     let c2 = git::commit_all(&dir, s.commit_c2, index)?;
     previous = current;
 
     for noise in &plan.noise_after {
         index += 1;
-        filler[noise.module].extra_fns += 1;
-        let current = tree(plan, &filler, &p1, Stage::C2, false);
+        match noise.target {
+            NoiseTarget::Provider => provider_noise += 1,
+            NoiseTarget::Filler(module) => filler[module].extra_fns += 1,
+        }
+        let current = tree(plan, &filler, &p1, Stage::C2, provider_noise);
         write_tree(&dir, &previous, &current)?;
         git::commit_all(&dir, &noise.message, index)?;
         previous = current;
@@ -370,22 +419,15 @@ pub fn build(plan: &RepoPlan, out_root: &Path) -> Result<RepoSpec> {
 
     index += 1;
     let (current, message, c3_stage) = match plan.drift {
-        Some(kind) => {
-            if kind == DriftKind::Duplicate {
-                if let Some(caller) = filler.iter_mut().find(|f| f.role == FillerRole::Caller) {
-                    caller.role = FillerRole::LegacyCaller;
-                }
-            }
-            (
-                tree(plan, &filler, &p3, Stage::C2, kind == DriftKind::Duplicate),
-                s.commit_c3_drift,
-                Stage::C2,
-            )
-        }
+        Some(_) => (
+            tree(plan, &filler, &p3, Stage::C2, provider_noise),
+            s.commit_c3_drift,
+            Stage::C2,
+        ),
         None => {
             filler[plan.body_change_module].extra_fns += 1;
             (
-                tree(plan, &filler, &p3, Stage::C3Variant, false),
+                tree(plan, &filler, &p3, Stage::C3Variant, provider_noise),
                 s.commit_c3_body,
                 Stage::C3Variant,
             )
@@ -465,6 +507,18 @@ mod tests {
             assert_eq!(x.drift, y.drift);
             assert_eq!(x.filler, y.filler);
             assert_eq!(x.noise_before.len() + x.noise_after.len(), 4);
+            // Most noise sits between C1 and C2, and at least half of that
+            // touches the provider file itself.
+            assert!(x.noise_before.len() >= x.noise_after.len());
+            let provider_noise = x
+                .noise_before
+                .iter()
+                .filter(|n| n.target == NoiseTarget::Provider)
+                .count();
+            assert!(
+                provider_noise * 2 >= x.noise_before.len(),
+                "{provider_noise}"
+            );
         }
         let ids: BTreeSet<&str> = a.iter().map(|r| r.scenario.id).collect();
         assert_eq!(
@@ -524,16 +578,30 @@ mod tests {
                     assert_ne!(p1.arg, p3.arg);
                     assert_eq!(p1.fn_name, p3.fn_name);
                 }
-                Some(DriftKind::Duplicate) | None => assert_eq!(p1, p3),
+                Some(DriftKind::Delete) => {
+                    assert_ne!(p1.fn_name, p3.fn_name);
+                    assert_ne!(p1.arg, p3.arg);
+                }
+                Some(DriftKind::Duplicate) => panic!("duplicate is no longer generated"),
+                None => assert_eq!(p1, p3),
             }
         }
+        let kinds: BTreeSet<String> = plans_kinds();
+        assert!(!kinds.contains("Duplicate"));
+    }
+
+    fn plans_kinds() -> BTreeSet<String> {
+        plan(1, 10, 10, 0, &scenarios::all())
+            .iter()
+            .filter_map(|r| r.drift.map(|k| format!("{k:?}")))
+            .collect()
     }
 
     #[test]
     fn tree_lists_every_module_in_lib_rs() {
         let scenarios = scenarios::all();
         let repo = &plan(3, 1, 1, 0, &scenarios)[0];
-        let files = tree(repo, &repo.filler, &repo.params_c1(), Stage::C1, true);
+        let files = tree(repo, &repo.filler, &repo.params_c1(), Stage::C1, 3);
         let lib = &files["src/lib.rs"];
         for path in files
             .keys()
@@ -545,6 +613,13 @@ mod tests {
                 "{module} missing from lib.rs"
             );
         }
-        assert!(files.contains_key(&format!("src/legacy_{}.rs", repo.scenario.module)));
+        // The consumer module is present and imports the provider.
+        let consumer = &files[&format!("src/{}.rs", repo.scenario.consumer_module)];
+        assert!(consumer.contains(&format!("use crate::{}::", repo.scenario.module)));
+        // Provider noise lines are cosmetic comments, threaded by level.
+        let provider = &files[&repo.params_c1().anchor_file()];
+        assert_eq!(provider.matches("\n// ").count(), 3, "{provider}");
+        let quiet = tree(repo, &repo.filler, &repo.params_c1(), Stage::C1, 0);
+        assert_ne!(provider, &quiet[&repo.params_c1().anchor_file()]);
     }
 }

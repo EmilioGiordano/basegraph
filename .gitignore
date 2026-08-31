@@ -17,3 +17,9 @@ Thumbs.db
 /supplementary/pilot_seed123/.verify/
 /supplementary/pilot_seed123/results/work/
 /supplementary/pilot_seed123/results/target/
+
+# Second pilot batch (post-redesign)
+/supplementary/pilot_seed456/repo_*/
+/supplementary/pilot_seed456/.verify/
+/supplementary/pilot_seed456/results/work/
+/supplementary/pilot_seed456/results/target/
