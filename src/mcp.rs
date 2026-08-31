@@ -386,8 +386,21 @@ impl ServerState {
                     .iter()
                     .find(|n| n.fqn == fqn)
                     .ok_or_else(|| {
+                        let suggestions = anchor_suggestions(&self.graph, fqn);
+                        let hint = if suggestions.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                "; did you mean {}? (anchors use the indexed name: free functions bare, methods as Type::method)",
+                                suggestions
+                                    .iter()
+                                    .map(|s| format!("'{s}'"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        };
                         ToolError::BadArg(format!(
-                            "no symbol '{fqn}' in the current index; the anchor must exist"
+                            "no symbol '{fqn}' in the current index; the anchor must exist{hint}"
                         ))
                     })?;
                 let anchor = anchor::anchor_of(node);
@@ -534,6 +547,25 @@ fn content_result(id: Value, text: &str, is_error: bool) -> Value {
         id,
         json!({ "content": [ { "type": "text", "text": text } ], "isError": is_error }),
     )
+}
+
+/// Indexed fqns a mistyped anchor probably meant: agents often qualify with
+/// the crate/module path, while the index uses bare names for free functions
+/// and `Type::method` for methods.
+fn anchor_suggestions(graph: &Graph, requested: &str) -> Vec<String> {
+    let mut out: Vec<String> = graph
+        .nodes()
+        .iter()
+        .map(|n| n.fqn.as_str())
+        .filter(|fqn| {
+            requested.ends_with(&format!("::{fqn}")) || fqn.ends_with(&format!("::{requested}"))
+        })
+        .map(str::to_string)
+        .collect();
+    out.sort();
+    out.dedup();
+    out.truncate(3);
+    out
 }
 
 fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError> {
@@ -1273,6 +1305,34 @@ mod tests {
             }))
             .expect("response");
         assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn test_remember_qualified_anchor_suggests_the_indexed_name() {
+        let mut s = sample_state();
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 24, "method": "tools/call",
+                "params": { "name": "remember", "arguments": {
+                    "anchor": "demo::app::foo", "kind": "gotcha", "content": "x"
+                } }
+            }))
+            .expect("response");
+        assert_eq!(resp["result"]["isError"], true);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("did you mean 'foo'"), "{text}");
+
+        // A name nothing matches gets the plain error, no suggestions.
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 25, "method": "tools/call",
+                "params": { "name": "remember", "arguments": {
+                    "anchor": "zzz::nope", "kind": "gotcha", "content": "x"
+                } }
+            }))
+            .expect("response");
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(!text.contains("did you mean"), "{text}");
     }
 
     #[test]
