@@ -20,7 +20,7 @@ pipeline with a scripted agent.
 ## 1. Materials: `synth_repo_gen`
 
 ```
-synth_repo_gen --out synth_repos --seed 42 --count 10 --drift 7 --noise-commits 4 --verify \
+synth_repo_gen --out synth_repos --seed 42 --count 10 --drift 7 --verify \
                --supplementary supplementary/synth_repos_seed42
 ```
 
@@ -28,10 +28,20 @@ synth_repo_gen --out synth_repos --seed 42 --count 10 --drift 7 --noise-commits 
   output, return positivity, non-empty, no panic, idempotence, precondition,
   no side effect, commutativity), 20–60 files each, scripted history
   `C1 base → C2 bug fix leaving a latent invariant → C3 drift (rename | move |
-  signature | duplicate) or body-only change`. Commit dates and author are
-  fixed, so the same seed reproduces the same SHAs.
-- `--noise-commits N` is the findability knob of §3: filler commits buried
-  around the fix. `--count 3` gives the pilot batch of §0.
+  signature | delete) or body-only change`. Commit dates and author are
+  fixed, so the same seed reproduces the same SHAs. (`duplicate` drift was
+  dropped after the seed-123 pilot: free-function fqns are bare, so the
+  wrapper collided with the original and `recall` stayed intact.)
+- **Non-local invariants** (post-pilot redesign): each repo has a *provider*
+  module with the anchored fn and a separate *consumer* module that imports
+  it and depends on the invariant (`first_gap`, `load_timeout`, `place`, …).
+  The reason for the rule never sits next to the anchored fn; rediscovering
+  it takes a caller search or git archaeology.
+- `--noise-commits N` (default 10) is the findability knob of §3: most of the
+  noise lands between C1 and C2 and at least every other one of those commits
+  is a cosmetic comment pass over the provider file itself, so the fix is
+  buried in the anchored module's own history. `--count 3` gives the pilot
+  batch of §0.
 - Per task, next to the repo but never committed: `task_N.md` (the request,
   with the API it needs), `primary_test_N.rs` (validates the task),
   `oracle_test_N.rs` (detects the invariant violation), `fix_correct_N.rs`

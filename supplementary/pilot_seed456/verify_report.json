@@ -1,0 +1,380 @@
+[
+  {
+    "repo_id": "repo_01",
+    "ok": true,
+    "checks": [
+      {
+        "task_id": "-",
+        "state": "pristine",
+        "target": "own suite",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "pristine",
+        "target": "primary_test_1",
+        "expect": "not pass",
+        "outcome": "fail",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "pristine",
+        "target": "oracle_test_1",
+        "expect": "pass or compile error",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_correct",
+        "target": "primary_test_1",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_correct",
+        "target": "oracle_test_1",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_correct",
+        "target": "own suite",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_wrong",
+        "target": "primary_test_1",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_wrong",
+        "target": "oracle_test_1",
+        "expect": "fail",
+        "outcome": "fail",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "pristine",
+        "target": "primary_test_2",
+        "expect": "not pass",
+        "outcome": "fail",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "pristine",
+        "target": "oracle_test_2",
+        "expect": "pass or compile error",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_correct",
+        "target": "primary_test_2",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_correct",
+        "target": "oracle_test_2",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_correct",
+        "target": "own suite",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_wrong",
+        "target": "primary_test_2",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_wrong",
+        "target": "oracle_test_2",
+        "expect": "fail",
+        "outcome": "fail",
+        "ok": true
+      }
+    ]
+  },
+  {
+    "repo_id": "repo_02",
+    "ok": true,
+    "checks": [
+      {
+        "task_id": "-",
+        "state": "pristine",
+        "target": "own suite",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "pristine",
+        "target": "primary_test_1",
+        "expect": "not pass",
+        "outcome": "compile_error",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "pristine",
+        "target": "oracle_test_1",
+        "expect": "pass or compile error",
+        "outcome": "compile_error",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_correct",
+        "target": "primary_test_1",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_correct",
+        "target": "oracle_test_1",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_correct",
+        "target": "own suite",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_wrong",
+        "target": "primary_test_1",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_wrong",
+        "target": "oracle_test_1",
+        "expect": "fail",
+        "outcome": "fail",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "pristine",
+        "target": "primary_test_2",
+        "expect": "not pass",
+        "outcome": "compile_error",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "pristine",
+        "target": "oracle_test_2",
+        "expect": "pass or compile error",
+        "outcome": "compile_error",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_correct",
+        "target": "primary_test_2",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_correct",
+        "target": "oracle_test_2",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_correct",
+        "target": "own suite",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_wrong",
+        "target": "primary_test_2",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_wrong",
+        "target": "oracle_test_2",
+        "expect": "fail",
+        "outcome": "fail",
+        "ok": true
+      }
+    ]
+  },
+  {
+    "repo_id": "repo_03",
+    "ok": true,
+    "checks": [
+      {
+        "task_id": "-",
+        "state": "pristine",
+        "target": "own suite",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "pristine",
+        "target": "primary_test_1",
+        "expect": "not pass",
+        "outcome": "compile_error",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "pristine",
+        "target": "oracle_test_1",
+        "expect": "pass or compile error",
+        "outcome": "compile_error",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_correct",
+        "target": "primary_test_1",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_correct",
+        "target": "oracle_test_1",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_correct",
+        "target": "own suite",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_wrong",
+        "target": "primary_test_1",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_1",
+        "state": "fix_wrong",
+        "target": "oracle_test_1",
+        "expect": "fail",
+        "outcome": "fail",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "pristine",
+        "target": "primary_test_2",
+        "expect": "not pass",
+        "outcome": "compile_error",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "pristine",
+        "target": "oracle_test_2",
+        "expect": "pass or compile error",
+        "outcome": "compile_error",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_correct",
+        "target": "primary_test_2",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_correct",
+        "target": "oracle_test_2",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_correct",
+        "target": "own suite",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_wrong",
+        "target": "primary_test_2",
+        "expect": "pass",
+        "outcome": "pass",
+        "ok": true
+      },
+      {
+        "task_id": "task_2",
+        "state": "fix_wrong",
+        "target": "oracle_test_2",
+        "expect": "fail",
+        "outcome": "fail",
+        "ok": true
+      }
+    ]
+  }
+]
