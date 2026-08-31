@@ -30,7 +30,12 @@ payload no puede aportar por sí mismo:
 1. **Validez**: si el mundo para el que se escribió la regla sigue existiendo. Un texto
    no sabe que quedó viejo; el ancla sí.
 2. **Referente**: a **qué símbolo actual** aplica la regla hoy. Los candidatos de
-   re-anclaje (por `sig_hash`/`shape_hash`) resuelven la dirección post-drift.
+   re-anclaje resuelven la dirección post-drift — por `sig_hash` cuando el nombre
+   sobrevive con otra ruta (moves de métodos: `A::run` → `B::run`), y por
+   `shape_hash` (la firma **sin** el nombre) cuando el símbolo fue renombrado.
+   Nota de hecho: `sig_hash` hashea `"{name} {signature}"` (`src/parser/sig.rs`),
+   así que **todo rename lo cambia**; el camino de re-anclaje de un rename es
+   siempre `shape_hash`.
 3. **Calibración**: lo incierto nunca se sirve como `intact`, lo que fuerza verificación
    antes de actuar (la métrica de falsa confianza mide precisamente esto).
 
@@ -63,17 +68,20 @@ cambia lo que el código hace en C3; cambian *dónde vive* la responsabilidad.
 
 - **Qué emite el generador** (ej. sobre `no_side_effect`/billing): en C3,
   `render_invoice` se parte por refactor en `render_preview` (camino de solo lectura,
-  conserva la firma vieja → `sig_hash` matchea) y `render_and_register` (camino de
-  emisión, que **legítimamente** consume `issue_number()` al finalizar — comportamiento
-  que en C2 vivía en el caller `Invoice::issue`, movido, no cambiado). Las tareas tocan
-  ambos caminos.
+  conserva la **forma** — mismos params y retorno; el nombre cambió, así que el match
+  es por `shape_hash`, no por `sig_hash`) y `render_and_register` (camino de emisión,
+  que **legítimamente** consume `issue_number()` al finalizar — comportamiento que en
+  C2 vivía en el caller `Invoice::issue`, movido, no cambiado). **Requisito duro**:
+  `render_and_register` debe diferir del ancla en aridad o tipo de retorno; si ambos
+  sucesores compartieran la forma, los dos entrarían al set de candidatos y la ventaja
+  de A2 se disuelve. Las tareas tocan ambos caminos.
 - **Por qué A1 falla**: la nota dice "nunca avanza `NEXT_INVOICE`". Grep de
   `NEXT_INVOICE` encuentra los dos sucesores. La lectura natural de la nota
   ("never advances") empuja a mantener puro también el camino de registro → el fix
   "obvio" reutiliza un número peekeado o no lo consume → números duplicados/ausentes.
-- **Por qué A2 acierta**: `recall` → `orphaned` con candidato por `sig_hash` =
-  `render_preview` **solamente** (el otro sucesor cambió de firma). La regla queda
-  acotada al sucesor correcto.
+- **Por qué A2 acierta**: `recall` → `orphaned` con candidato por `shape_hash` =
+  `render_preview` **solamente** (el otro sucesor difiere en params/retorno, así que su
+  forma no matchea). La regla queda acotada al sucesor correcto.
 - **Oracle**: dos aserciones — el preview repetido no consume números
   (`NEXT_INVOICE` estable) **y** el camino de registro emite números únicos y
   crecientes. El fix de A1 mal aplicado rompe la segunda; ignorar la regla rompe la
@@ -82,8 +90,9 @@ cambia lo que el código hace en C3; cambian *dónde vive* la responsabilidad.
 ### (b) Drift **delete con homónimo** — el nombre viejo sobrevive en otro módulo con otra semántica
 
 - **Qué emite el generador** (ej. sobre `sorted_output`/scheduling): en C3 el proveedor
-  renombra `merge_windows` → `coalesce_requests` (misma firma → candidato por
-  `sig_hash`), y otro módulo gana un homónimo **como método**,
+  renombra `merge_windows` → `coalesce_requests` (misma forma → candidato por
+  `shape_hash`; el rename descarta `sig_hash` por definición), y otro módulo gana un
+  homónimo **como método**,
   `PaneLayout::merge_windows` (UI: fusiona paneles preservando el **orden de inserción**;
   su propia suite fija ese contrato). El método es necesario: con fqns pelados, un
   homónimo función libre colisionaría con el ancla y `classify` daría un falso `evolved`
@@ -94,8 +103,13 @@ cambia lo que el código hace en C3; cambian *dónde vive* la responsabilidad.
   de inserción → su primary falla), o bien concluye que la regla no concierne a la tarea
   y deja sin proteger a `coalesce_requests` → el fix obvio de la tarea rompe el orden →
   oracle falla.
-- **Por qué A2 acierta**: `recall` → `orphaned`; el candidato por `sig_hash` es
-  `coalesce_requests` (el homónimo-método ni aparece: otra firma, otro shape).
+- **Por qué A2 acierta**: `recall` → `orphaned`; el candidato por `shape_hash` es
+  `coalesce_requests`. **Requisito duro sobre el homónimo**: debe diferir del ancla en
+  aridad o tipo de retorno. No alcanza con el nombre — y en este caso el nombre juega
+  en contra: el método se llama igual que el ancla vieja, así que con firma idéntica
+  matchearía incluso la rama `sig_hash` (que `classify` prueba **primero**) y `recall`
+  apuntaría a A2 directo al símbolo equivocado. Con la forma distinta, ni `sig_hash`
+  ni `shape_hash` lo eligen.
 - **Oracle**: orden del schedule de `coalesce_requests` (como hoy) + la suite propia del
   homónimo (orden de inserción preservado) corre en la verificación del generador para
   garantizar que "ordenarlo" es un fix incorrecto detectable.
@@ -135,7 +149,7 @@ consumidores/callers o por arqueología de commits, al costo de siempre.
 | `tools/common/schema.rs` | `DriftKind::Split` nuevo; `Delete` gana la variante con homónimo (campo `homonym: Option<…>` en el spec del repo o kind `DeleteWithHomonym`). Manifest: `successors: Vec<fqn>` + `rule_applies_to: fqn` (para la rúbrica y el scoring), y el fqn del homónimo cuando exista. |
 | `tools/synth_repo_gen/scenarios.rs` | Por escenario: plantillas de **sucesores** (split: dos fns C3 + consumidor actualizado), plantilla de **homónimo** (método en módulo ajeno, con doc y suite propia que fija su contrato), plantillas de **vecinos plausibles** para (c). Los `invariant_text` de los escenarios tipo (c) se reescriben para no nombrar colaboradores estables. Tareas y fixes (correcto/obvio) renderizados contra los sucesores. |
 | `tools/synth_repo_gen/render.rs` | Render de proveedor con N sucesores; render del módulo homónimo; consumidor parametrizado por sucesor. |
-| `tools/synth_repo_gen/assemble.rs` | Aplicar los kinds nuevos en C3 (split reparte el módulo; homónimo aterriza en un módulo existente o nuevo); poblar los campos nuevos del manifest; **verify extendido**: pristine/correcto/obvio como hoy **más** las suites propias de homónimos y vecinos en verde con el fix correcto, y en rojo con la mala aplicación de la regla (el engaño tiene que ser detectable por construcción, no por suerte). |
+| `tools/synth_repo_gen/assemble.rs` | Aplicar los kinds nuevos en C3 (split reparte el módulo; homónimo aterriza en un módulo existente o nuevo); poblar los campos nuevos del manifest; **verify extendido**: pristine/correcto/obvio como hoy, **más** (i) las suites propias de homónimos y vecinos en verde con el fix correcto y en rojo con la mala aplicación de la regla, y (ii) un **chequeo mecánico de discriminación de candidatos**: correr `classify` con el ancla C2 contra el índice C3 y exigir que el set de candidatos sea exactamente `{rule_applies_to}` — es decir, `shape_hash` del sucesor equivocado / homónimo / vecinos ≠ `shape_hash` del ancla, y `sig_hash` distinto para homónimos que conservan el nombre. La generación **falla** si un candidato espurio entra al set; la discriminación no se confía al autor del escenario. |
 | `tools/experiment_runner` | Sin cambios de lógica; opcionalmente registrar qué archivos editó el agente (ya se infiere del transcript) para la revisión con rúbrica. |
 | `capture.rs` (prompts) | **Sin cambios**: el payload sigue simétrico entre A1 y A2. El fix es de materiales — la asimetría legítima es que el payload subdetermine, no que A2 reciba más información. |
 
@@ -189,6 +203,12 @@ término el experimento es promocional, no decisivo").
    mundo del agente, no solo en el del experimentador.
 4. **Todos los repos embarcados cuentan**: nada de podar escenarios después de ver
    resultados; la selección queda fijada en el pre-registro del batch.
+5. **Discriminación por forma garantizada**: el discriminador de un rename es
+   `shape_hash` (la firma sin el nombre), no el nombre. Un sucesor equivocado, homónimo
+   o vecino queda fuera del set de candidatos **solo si difiere en params o retorno**
+   respecto del ancla. Es un requisito del generador, chequeado mecánicamente por
+   `--verify` (sección 3), no una convención de redacción; si el chequeo falla, el
+   material no embarca.
 
 **Señales de que nos pasamos al otro extremo (monitorear en el pilot del batch nuevo):**
 - A1 viola **más que A0** en drift de forma sistemática *aun cuando verificó* (leyó el
