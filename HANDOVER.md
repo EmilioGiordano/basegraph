@@ -100,43 +100,65 @@ afirman que no hay directorio `tests/`; sí lo hay
 
 ---
 
-## 5. Dónde estamos: el probe A0 es la compuerta
+## 5. El resultado del piloto 2
 
-Por el hallazgo B decidimos no gastar las 18 corridas de una vez.
-`supplementary/pilot_seed456/PROBE_PREREGISTRATION.md` es **el protocolo
-vigente**: brazo A0 solo, 6 tareas, 1 seed, sin sesiones de siembra, con regla
-de parada firmada antes de correr y enmendada (§11) también antes de correr.
+| Brazo | Todas | Drift | fix_pass | Falsa confianza |
+|---|---|---|---|---|
+| A0 | 1/6 | 1/4 | 6/6 | 0 |
+| A1 | 0/6 | 0/4 | 6/6 | 0 |
+| A2 | 0/6 | 0/4 | 6/6 | 0 |
 
-Regla de parada vigente, sobre el **subconjunto drift** (repo_02 + repo_03,
-4 de 6 tareas):
+Contra `go-no-go.md` §7: la condición (a) **se cumple** (A2 0/6 estrictamente
+por debajo de A0 1/6). La (b) **no**: A2 y A1 empatan 0/4 en drift, y §7 hace de
+eso un disyunto de NO-GO.
 
-| Resultado A0 | Decisión |
-|---|---|
-| drift ≥1 | **SEGUIR** con siembra + A1/A2 (12 corridas), reutilizando las 6 de A0 |
-| drift 0, total ≥1 | Condición (b) no testeable. **No lanzar las 12.** Spike de 2 corridas A1 en repo_03 (~$2) para probar el mecanismo de descarte; seguir solo si A1 viola al menos una vez |
-| total 0, `fix_pass` ≥5/6 | **PARAR.** Arreglar materiales y re-pilotear |
-| total 0, `fix_pass` <5/6 | **PARAR**, pero el diagnóstico es dificultad/caps, no localidad |
+La ampliación de zona gris **no se tomó**, por el pre-compromiso §12.5 escrito
+antes de ver los números: A1 violó 0/4 en drift, así que el empate es B2
+confirmado — materiales, no potencia — y §0 manda arreglar el diseño, no comprar
+más n. **Veredicto: NO-GO.**
 
-Comandos exactos, precondiciones de aislamiento (`CLAUDE_CONFIG_DIR`,
-`--work-dir` fuera del árbol con `CLAUDE.md`) y cómo leer el resultado: §8 y §9
-del pre-registro. El veredicto §7 que imprime el scorer **no** es la salida del
-probe (con un solo brazo siempre da GREY); la salida es la línea
-`a0: n/6 = … drift n/4` más la columna `fix_pass`.
+La predicción §12.4 se confirmó entera, mecanismo incluido. Todo el registro está
+en `supplementary/pilot_seed456/PROBE_PREREGISTRATION.md` §12 y §13, escrito por
+etapas y siempre antes de la etapa siguiente.
 
 ---
 
-## 6. Después del probe
+## 6. El hallazgo que vale más que el veredicto
 
-- **Si SEGUIR:** sembrar A1/A2 y correr las 12 restantes sobre los mismos
-  materiales, con `--seeds 1` (el `run_id` termina en `-s0`; otro valor
-  re-ejecuta y re-paga las 6 de A0). Antes: `cargo build --release` completo
-  (hallazgo A).
-- **Si PARAR:** los fixes candidatos ya están listados en el pre-registro §6 y
-  §11.2, escritos antes de ver números — test de regresión de C2 bajo `tests/`,
-  mensajes de C2 no autodiagnósticos, cambiar el escenario de repo_03, y hacer
-  que la memoria stale sea *engañosa* y no solo mal direccionada.
-- **Campaña completa** (solo con señal): 10 repos, seed ≠ 42, `--verify`,
-  runner, scorer → `verdict.txt`.
+En repo_03 (drift de rename) A2 llamó `recall` sobre `src/billing.rs`,
+`issue_number`, `NEXT_INVOICE` y `format_invoice`. **Los cuatro devolvieron
+`count: 0`.** Nunca probó `render_invoice`, el nombre muerto, y no tenía cómo
+saberlo. La memoria huérfana jamás se recuperó, así que el clasificador de
+frescura nunca corrió sobre ella.
+
+La causa era del producto: `scope_matches` comparaba por igualdad exacta de
+string, y `classify` sabía resolver el sucesor pero ese resultado solo se usaba
+para **anotar**, nunca para **encontrar**. Dicho corto: el retrieval funcionaba
+exactamente cuando el nombre del ancla no había cambiado, que es exactamente
+cuando la frescura no aporta nada.
+
+**Ya está arreglado** (`goals/RECALL_RETRIEVAL_GOAL.md`): búsqueda por candidato
+de re-anclaje limitada a las bases `SigHash`/`ShapeHash`, retrieval por archivo,
+y `file` relativo a la raíz del índice en `AnchorKey` con `#[serde(default)]`.
+Verificado end-to-end contra el repo_03 real: las tres consultas que devolvían
+0 ahora devuelven la memoria, marcada con `reached_via` y con status `orphaned`.
+
+Nota de honestidad, obligatoria en cualquier piloto 3: el arreglo toca el MCP
+base, que `go-no-go.md` decía no tocar, y le da a A2 una capacidad que un
+`gotchas.md` no tiene. Se justifica porque es un bug del sistema bajo prueba
+descubierto por el experimento y documentado antes de decidir arreglarlo — pero
+el sistema bajo prueba cambió entre pilotos y eso no se puede comparar de
+frente. El argumento completo está en el goal.
+
+---
+
+## 6b. La bifurcación abierta
+
+- **Cerrar con el negativo.** Informe del piloto 2: NO-GO documentado, dos
+  defectos de instrumento con evidencia, metodología limpia. §7 dice
+  explícitamente que un resultado negativo es capítulo válido.
+- **Arreglar y re-pilotear.** Requiere el retrieval (hecho) más los materiales
+  según `goals/MEMORY_MISDIRECTION_GOAL.md`, más una campaña con seed ≠ 42.
 
 ---
 
