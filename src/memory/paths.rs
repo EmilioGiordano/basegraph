@@ -65,8 +65,14 @@ pub fn matches(stored: &str, query: &str) -> bool {
 /// server was started. Compared component-wise so a separator or case
 /// difference does not leave an absolute path in an anchor.
 fn strip_root_ignoring_case(path: &Path, root: &Path) -> Option<String> {
+    let wanted: Vec<Component> = root.components().filter(is_named).collect();
+    if wanted.is_empty() {
+        // A root of `.` names nothing to strip; consuming no component would
+        // leave the prefix and root separator in the tail and mangle the join.
+        return None;
+    }
     let mut rest = path.components().filter(is_named);
-    for want in root.components().filter(is_named) {
+    for want in wanted {
         if !same_component(rest.next()?, want) {
             return None;
         }
@@ -137,6 +143,12 @@ mod tests {
         assert_eq!(
             relative("D:/other/src/a.rs", Path::new("C:/repo")),
             "D:/other/src/a.rs"
+        );
+        // `codegraph build <abs>` then `codegraph mcp .`: a root that names
+        // nothing must leave the path alone rather than half-strip it.
+        assert_eq!(
+            relative("C:/repo/src/a.rs", Path::new(".")),
+            "C:/repo/src/a.rs"
         );
     }
 
