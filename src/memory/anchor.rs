@@ -5,21 +5,24 @@
 //! `Intact`. Only an exact fqn + signature-hash match is confident.
 
 use std::collections::BTreeSet;
+use std::path::Path;
 
 use serde::Serialize;
 
 use crate::graph::Graph;
 use crate::memory::model::{AnchorKey, Status};
+use crate::memory::paths;
 use crate::model::Node;
 use crate::parser::sig;
 
-/// Snapshot a node's identity as an anchor.
-pub fn anchor_of(node: &Node) -> AnchorKey {
+/// Snapshot a node's identity as an anchor. `root` is the indexed directory:
+/// the node's file is recorded relative to it, never as a machine path.
+pub fn anchor_of(node: &Node, root: &Path) -> AnchorKey {
     AnchorKey {
         fqn: node.fqn.clone(),
         sig_hash: node.sig_hash.clone(),
         shape_hash: sig::shape_hash(&node.name, &node.signature),
-        file: node.file.clone(),
+        file: paths::relative(&node.file, root),
     }
 }
 
@@ -50,6 +53,7 @@ pub fn confirm(
     anchor: &AnchorKey,
     chosen_fqn: &str,
     graph: &Graph,
+    root: &Path,
 ) -> Result<AnchorKey, ConfirmError> {
     let proposed = match classify(anchor, graph) {
         Classification::Intact => return Err(ConfirmError::Intact(anchor.fqn.clone())),
@@ -68,7 +72,7 @@ pub fn confirm(
         .nodes()
         .iter()
         .find(|n| n.fqn == chosen_fqn)
-        .map(anchor_of)
+        .map(|n| anchor_of(n, root))
         .ok_or_else(|| ConfirmError::Missing(chosen_fqn.to_string()))
 }
 
@@ -238,19 +242,19 @@ mod tests {
         (dir, graph)
     }
 
-    fn anchor_for(graph: &Graph, fqn: &str) -> AnchorKey {
+    fn anchor_for(dir: &TempDir, graph: &Graph, fqn: &str) -> AnchorKey {
         let node = graph
             .nodes()
             .iter()
             .find(|n| n.fqn == fqn)
             .expect("symbol present in the before-index");
-        anchor_of(node)
+        anchor_of(node, &dir.0)
     }
 
     #[test]
     fn anchor_of_snapshots_name_bearing_and_name_free_hashes() {
-        let (_d, graph) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
-        let anchor = anchor_for(&graph, "compute");
+        let (d, graph) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
+        let anchor = anchor_for(&d, &graph, "compute");
         let node = &graph.nodes()[0];
         assert_eq!(anchor.fqn, "compute");
         assert_eq!(anchor.sig_hash, node.sig_hash);
@@ -259,30 +263,46 @@ mod tests {
             sig::shape_hash("compute", &node.signature)
         );
         assert_ne!(anchor.shape_hash, anchor.sig_hash);
-        assert_eq!(anchor.file, node.file);
-        assert!(!anchor.file.is_empty());
+        // The node carries an absolute machine path; the anchor never does.
+        assert_eq!(anchor.file, "a.rs");
+        assert!(Path::new(&node.file).is_absolute());
+        assert!(!Path::new(&anchor.file).is_absolute());
+    }
+
+    #[test]
+    fn a_nested_file_is_anchored_by_its_path_under_the_root() {
+        let dir = TempDir::new();
+        std::fs::create_dir_all(dir.0.join("src")).expect("create src dir");
+        std::fs::write(
+            dir.0.join("src").join("billing.rs"),
+            "pub fn render_invoice(id: u32) -> String { String::new() }",
+        )
+        .expect("write source");
+        let graph = build_graph(&dir.0).expect("build graph");
+        let anchor = anchor_for(&dir, &graph, "render_invoice");
+        assert_eq!(anchor.file, "src/billing.rs");
     }
 
     #[test]
     fn confirm_accepts_a_proposed_rename() {
-        let (_b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
-        let (_a, after) = build(&[("a.rs", "pub fn evaluate(x: i32) -> i32 { x }")]);
-        let anchor = anchor_for(&before, "compute");
+        let (b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
+        let (a, after) = build(&[("a.rs", "pub fn evaluate(x: i32) -> i32 { x }")]);
+        let anchor = anchor_for(&b, &before, "compute");
         assert!(classify(&anchor, &after).is_uncertain());
 
-        let confirmed = confirm(&anchor, "evaluate", &after).expect("proposed candidate");
-        assert_eq!(confirmed, anchor_for(&after, "evaluate"));
+        let confirmed = confirm(&anchor, "evaluate", &after, &a.0).expect("proposed candidate");
+        assert_eq!(confirmed, anchor_for(&a, &after, "evaluate"));
         assert_eq!(classify(&confirmed, &after), Classification::Intact);
     }
 
     #[test]
     fn confirm_accepts_the_evolved_interface_under_the_same_fqn() {
-        let (_b, before) = build(&[("a.rs", "pub fn total(a: i32) -> i32 { a }")]);
-        let (_a, after) = build(&[("a.rs", "pub fn total(a: i64) -> i64 { 0 }")]);
-        let anchor = anchor_for(&before, "total");
+        let (b, before) = build(&[("a.rs", "pub fn total(a: i32) -> i32 { a }")]);
+        let (a, after) = build(&[("a.rs", "pub fn total(a: i64) -> i64 { 0 }")]);
+        let anchor = anchor_for(&b, &before, "total");
         assert_eq!(classify(&anchor, &after), Classification::Evolved);
 
-        let confirmed = confirm(&anchor, "total", &after).expect("same fqn");
+        let confirmed = confirm(&anchor, "total", &after, &a.0).expect("same fqn");
         assert_eq!(confirmed.fqn, "total");
         assert_ne!(confirmed.sig_hash, anchor.sig_hash);
         assert_eq!(classify(&confirmed, &after), Classification::Intact);
@@ -290,15 +310,15 @@ mod tests {
 
     #[test]
     fn confirm_rejects_anything_not_proposed() {
-        let (_b, before) = build(&[("a.rs", "pub fn total(a: i32) -> i32 { a }")]);
-        let (_a, after) = build(&[(
+        let (b, before) = build(&[("a.rs", "pub fn total(a: i32) -> i32 { a }")]);
+        let (a, after) = build(&[(
             "a.rs",
             "pub fn total(a: i64) -> i64 { 0 }\npub fn other(a: i64) -> i64 { 0 }",
         )]);
-        let anchor = anchor_for(&before, "total");
+        let anchor = anchor_for(&b, &before, "total");
         // `other` exists in the index but was never proposed: refused.
         assert_eq!(
-            confirm(&anchor, "other", &after),
+            confirm(&anchor, "other", &after, &a.0),
             Err(ConfirmError::NotProposed {
                 fqn: "total".into(),
                 chosen: "other".into(),
@@ -309,15 +329,15 @@ mod tests {
 
     #[test]
     fn confirm_lists_every_candidate_of_an_ambiguous_rename() {
-        let (_b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
-        let (_a, after) = build(&[(
+        let (b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
+        let (a, after) = build(&[(
             "a.rs",
             "pub fn evaluate(x: i32) -> i32 { x }\n\
              pub fn assess(x: i32) -> i32 { x }\n\
              pub fn unrelated(s: String) -> String { s }",
         )]);
-        let anchor = anchor_for(&before, "compute");
-        match confirm(&anchor, "unrelated", &after) {
+        let anchor = anchor_for(&b, &before, "compute");
+        match confirm(&anchor, "unrelated", &after, &a.0) {
             Err(ConfirmError::NotProposed { candidates, .. }) => {
                 assert_eq!(candidates.len(), 2);
                 assert!(candidates.contains(&"evaluate".to_string()));
@@ -325,31 +345,31 @@ mod tests {
             }
             other => panic!("expected NotProposed, got {other:?}"),
         }
-        assert!(confirm(&anchor, "assess", &after).is_ok());
+        assert!(confirm(&anchor, "assess", &after, &a.0).is_ok());
     }
 
     #[test]
     fn confirm_rejects_intact_and_orphaned_anchors() {
-        let (_b, before) = build(&[(
+        let (b, before) = build(&[(
             "a.rs",
             "pub fn keep(x: i32) -> i32 { x }\npub fn obsolete(token: String) -> Vec<u8> { vec![] }",
         )]);
-        let (_a, after) = build(&[("a.rs", "pub fn keep(x: i32) -> i32 { x }")]);
+        let (a, after) = build(&[("a.rs", "pub fn keep(x: i32) -> i32 { x }")]);
         assert_eq!(
-            confirm(&anchor_for(&before, "keep"), "keep", &after),
+            confirm(&anchor_for(&b, &before, "keep"), "keep", &after, &a.0),
             Err(ConfirmError::Intact("keep".into()))
         );
         assert_eq!(
-            confirm(&anchor_for(&before, "obsolete"), "keep", &after),
+            confirm(&anchor_for(&b, &before, "obsolete"), "keep", &after, &a.0),
             Err(ConfirmError::NoCandidates("obsolete".into()))
         );
     }
 
     #[test]
     fn unchanged_symbol_is_intact() {
-        let (_b, before) = build(&[("a.rs", "pub fn keep(x: i32) -> i32 { x }")]);
+        let (b, before) = build(&[("a.rs", "pub fn keep(x: i32) -> i32 { x }")]);
         let (_a, after) = build(&[("a.rs", "pub fn keep(x: i32) -> i32 { x + 1 }")]);
-        let anchor = anchor_for(&before, "keep");
+        let anchor = anchor_for(&b, &before, "keep");
         assert_eq!(classify(&anchor, &after), Classification::Intact);
     }
 
@@ -357,9 +377,9 @@ mod tests {
     fn scenario_rename_is_uncertain_reanchor() {
         // A pure rename changes the name-bearing sig_hash, but the name-free
         // shape hash still matches, so it is an uncertain proposal, not Orphaned.
-        let (_b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
+        let (b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
         let (_a, after) = build(&[("a.rs", "pub fn evaluate(x: i32) -> i32 { x }")]);
-        let anchor = anchor_for(&before, "compute");
+        let anchor = anchor_for(&b, &before, "compute");
         let c = classify(&anchor, &after);
         assert_eq!(
             c,
@@ -376,12 +396,12 @@ mod tests {
     fn scenario_rename_with_shared_shape_is_ambiguous() {
         // Two functions share the shape, so a rename yields multiple candidates:
         // uncertain, never a confident Intact.
-        let (_b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
+        let (b, before) = build(&[("a.rs", "pub fn compute(x: i32) -> i32 { x }")]);
         let (_a, after) = build(&[(
             "a.rs",
             "pub fn evaluate(x: i32) -> i32 { x }\npub fn assess(x: i32) -> i32 { x }",
         )]);
-        let anchor = anchor_for(&before, "compute");
+        let anchor = anchor_for(&b, &before, "compute");
         let c = classify(&anchor, &after);
         match &c {
             Classification::ReanchorCandidate { candidates, basis } => {
@@ -399,18 +419,18 @@ mod tests {
     #[test]
     fn scenario_move_free_fn_keeps_fqn_and_is_intact() {
         // A free fn's fqn is its name, so moving files leaves the anchor intact.
-        let (_b, before) = build(&[("a.rs", "pub fn handler(x: i32) -> i32 { x }")]);
+        let (b, before) = build(&[("a.rs", "pub fn handler(x: i32) -> i32 { x }")]);
         let (_a, after) = build(&[("b.rs", "pub fn handler(x: i32) -> i32 { x }")]);
-        let anchor = anchor_for(&before, "handler");
+        let anchor = anchor_for(&b, &before, "handler");
         assert_eq!(classify(&anchor, &after), Classification::Intact);
     }
 
     #[test]
     fn scenario_move_method_to_new_type_is_uncertain_reanchor() {
         // fqn changes (A::run -> B::run) but the method signature hash is stable.
-        let (_b, before) = build(&[("a.rs", "struct A; impl A { pub fn run(&self) {} }")]);
+        let (b, before) = build(&[("a.rs", "struct A; impl A { pub fn run(&self) {} }")]);
         let (_a, after) = build(&[("a.rs", "struct B; impl B { pub fn run(&self) {} }")]);
-        let anchor = anchor_for(&before, "A::run");
+        let anchor = anchor_for(&b, &before, "A::run");
         let c = classify(&anchor, &after);
         assert_eq!(
             c,
@@ -425,9 +445,9 @@ mod tests {
 
     #[test]
     fn scenario_signature_change_is_evolved() {
-        let (_b, before) = build(&[("a.rs", "pub fn total(a: i32, b: i32) -> i32 { a + b }")]);
+        let (b, before) = build(&[("a.rs", "pub fn total(a: i32, b: i32) -> i32 { a + b }")]);
         let (_a, after) = build(&[("a.rs", "pub fn total(a: i32, b: i64) -> i64 { 0 }")]);
-        let anchor = anchor_for(&before, "total");
+        let anchor = anchor_for(&b, &before, "total");
         let c = classify(&anchor, &after);
         assert_eq!(c, Classification::Evolved);
         assert_eq!(c.status(), Status::Evolved);
@@ -437,12 +457,12 @@ mod tests {
     fn scenario_deletion_is_orphaned() {
         // The deleted symbol has a distinctive shape, so nothing shape-matches
         // it (a trivially-shaped `fn ()` would instead surface as a candidate).
-        let (_b, before) = build(&[(
+        let (b, before) = build(&[(
             "a.rs",
             "pub fn obsolete(token: String) -> Vec<u8> { vec![] }\npub fn other() {}",
         )]);
         let (_a, after) = build(&[("a.rs", "pub fn other() {}")]);
-        let anchor = anchor_for(&before, "obsolete");
+        let anchor = anchor_for(&b, &before, "obsolete");
         assert_eq!(classify(&anchor, &after), Classification::Orphaned);
     }
 
@@ -464,7 +484,7 @@ mod tests {
     fn scenario_duplicated_subtree_is_uncertain_never_intact() {
         // The anchored fqn is gone and TWO nodes now share its signature hash:
         // ambiguous, so it must resolve to an uncertain proposal, never Intact.
-        let (_b, before) = build(&[(
+        let (b, before) = build(&[(
             "a.rs",
             "struct Original; impl Original { pub fn helper(&self) -> i32 { 0 } }",
         )]);
@@ -474,7 +494,7 @@ mod tests {
              impl CopyA { pub fn helper(&self) -> i32 { 0 } }\n\
              impl CopyB { pub fn helper(&self) -> i32 { 0 } }",
         )]);
-        let anchor = anchor_for(&before, "Original::helper");
+        let anchor = anchor_for(&b, &before, "Original::helper");
         let c = classify(&anchor, &after);
 
         match &c {
@@ -494,7 +514,7 @@ mod tests {
     fn token_similarity_fallback_is_uncertain() {
         // Renamed AND reshaped: neither sig_hash nor shape_hash matches, but the
         // fqn tokens overlap enough to propose a re-anchor — still uncertain.
-        let (_b, before) = build(&[(
+        let (b, before) = build(&[(
             "a.rs",
             "struct Foo; impl Foo { pub fn compute_total(&self) -> i32 { 0 } }",
         )]);
@@ -502,7 +522,7 @@ mod tests {
             "a.rs",
             "struct Foo; impl Foo { pub fn compute_total_sum(&self, extra: i32) -> i64 { 0 } }",
         )]);
-        let anchor = anchor_for(&before, "Foo::compute_total");
+        let anchor = anchor_for(&b, &before, "Foo::compute_total");
         let c = classify(&anchor, &after);
         assert!(
             matches!(
@@ -521,10 +541,10 @@ mod tests {
     #[test]
     fn invariant_uncertain_is_never_intact() {
         // The load-bearing property, checked across every synthetic scenario.
-        let (_b1, before1) = build(&[("a.rs", "struct A; impl A { pub fn run(&self) {} }")]);
+        let (b1, before1) = build(&[("a.rs", "struct A; impl A { pub fn run(&self) {} }")]);
         let (_a1, after1) = build(&[("a.rs", "struct B; impl B { pub fn run(&self) {} }")]);
 
-        let (_b2, before2) = build(&[(
+        let (b2, before2) = build(&[(
             "a.rs",
             "struct O; impl O { pub fn helper(&self) -> i32 { 0 } }",
         )]);
@@ -535,7 +555,7 @@ mod tests {
              impl Q { pub fn helper(&self) -> i32 { 0 } }",
         )]);
 
-        let (_b3, before3) = build(&[(
+        let (b3, before3) = build(&[(
             "a.rs",
             "struct Foo; impl Foo { pub fn load_user_data(&self) {} }",
         )]);
@@ -545,9 +565,9 @@ mod tests {
         )]);
 
         let cases = [
-            classify(&anchor_for(&before1, "A::run"), &after1),
-            classify(&anchor_for(&before2, "O::helper"), &after2),
-            classify(&anchor_for(&before3, "Foo::load_user_data"), &after3),
+            classify(&anchor_for(&b1, &before1, "A::run"), &after1),
+            classify(&anchor_for(&b2, &before2, "O::helper"), &after2),
+            classify(&anchor_for(&b3, &before3, "Foo::load_user_data"), &after3),
         ];
 
         for c in &cases {
