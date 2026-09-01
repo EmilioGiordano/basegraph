@@ -94,9 +94,11 @@ materiales del piloto no reaparezcan dentro de ella. El nombre del directorio
 se deja como está (documentado en `PROBE_PREREGISTRATION.md` §10); renombrarlo
 rompería comandos ya en circulación.
 
-**D — Docs menores.** `CLAUDE.md:13` y `AGENTS.md:29,97` (ambos untracked)
-afirman que no hay directorio `tests/`; sí lo hay
-(`tests/experiment_integration.rs`, `tests/memory_lifecycle.rs`).
+**D — Resuelto.** `CLAUDE.md` y `AGENTS.md` afirmaban que no hay directorio
+`tests/`; corregido.
+
+**E — Resuelto, y es el hallazgo principal del piloto 2.** `recall` no podía
+recuperar una memoria cuyo ancla había muerto. Ver sección 6.
 
 ---
 
@@ -167,7 +169,9 @@ frente. El argumento completo está en el goal.
 | Archivo | Qué contiene |
 |---------|--------------|
 | `go-no-go.md` | Protocolo **sellado** (v2): umbrales, diseño, rúbrica FC, cronograma |
-| `supplementary/pilot_seed456/PROBE_PREREGISTRATION.md` | **Protocolo vigente** del probe A0 + enmienda §11 |
+| `supplementary/pilot_seed456/PROBE_PREREGISTRATION.md` | Protocolo del piloto 2: probe (§1-§10), enmienda §11, resultado del probe §12, veredicto y hallazgo de retrieval §13 |
+| `goals/RECALL_RETRIEVAL_GOAL.md` | Spec del fix de `recall` (implementado y verificado) |
+| `goals/MEMORY_MISDIRECTION_GOAL.md` | Spec del fix de materiales B2 (solo diseño, sin implementar) |
 | `supplementary/pilot_seed123/PILOT_REPORT.md` | Informe del piloto 1: 18 corridas, hallazgos, veredicto |
 | `doc-estado-y-tesis.md` | Diagnóstico del grafo, pivote a memoria, marco teórico, framing |
 | `RESUMEN_EJECUTIVO.md` | Mapa condensado (desactualizado: dice 184 tests) |
