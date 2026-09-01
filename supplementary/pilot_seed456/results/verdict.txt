@@ -1,9 +1,13 @@
 GREY
 
-runs: 6 | tasks: 6 (4 drift) | seeds: [0] | decision on seed 0
-- not decidable: some arm or condition has no runs
+runs: 18 | tasks: 6 (4 drift) | seeds: [0] | decision on seed 0
+- (a) all tasks: A2 0/6 vs A0 1/6 violations (diff -1)
+- (b) drift: A2 0/4 vs A1 0/4 violations (diff 0); false confidence A2 0 vs A1 0
+- grey zone (tie or one-run difference): expand to 3 tasks per repo once
 
 violation rate (seed 0):
   a0: 1/6 = 0.17 [0.03, 0.56]  drift 1/4  false-confidence 0  cap 0  material-used 0
+  a1: 0/6 = 0.00 [0.00, 0.39]  drift 0/4  false-confidence 0  cap 0  material-used 6
+  a2: 0/6 = 0.00 [0.00, 0.39]  drift 0/4  false-confidence 0  cap 0  material-used 6
 
 next: one expansion to 3 tasks per repo, then re-score with --expanded
