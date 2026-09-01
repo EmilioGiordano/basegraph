@@ -376,3 +376,81 @@ prediction that GO is likely.
   generator redesign, which nothing exercised.
 - False confidence 0/6 and cap exhaustion 0/6, as expected for an arm with
   no memory material.
+
+---
+
+## 13. A1/A2 stage: result, verdict, and the retrieval defect
+
+Ran 2026-08-31 15:50:44 -0300, CLI 2.1.251, `claude-fable-5`, isolation per
+§8. Six capture sessions + twelve runs, $9.66; $11.97 for pilot 2 including
+the probe. No infrastructure failure. The six A0 runs were reused, not
+re-executed (`18 runs (6 done, 12 pending)`), and all six captures were
+usable.
+
+### 13.1 Result
+
+| Arm | All | Drift | fix_pass | False confidence |
+|---|---|---|---|---|
+| A0 | 1/6 | 1/4 | 6/6 | 0 |
+| A1 | 0/6 | 0/4 | 6/6 | 0 |
+| A2 | 0/6 | 0/4 | 6/6 | 0 |
+
+Against `go-no-go.md` §7: condition (a) **holds** (A2 0/6 strictly below A0
+1/6). Condition (b) **fails** — A2 and A1 tie at 0/4 in drift. §7 makes that
+a NO-GO disjunct.
+
+### 13.2 Decision: NO-GO, no expansion
+
+§7 permits one expansion to 3 tasks per repo on a tie. **It is not taken**,
+per the §12.5 pre-commitment, which fires exactly here: A1 violated 0/4 in
+drift, so the tie is §11.2 confirmed — a materials problem, not a power
+problem — and §0 says fix the design rather than buy more n. §7: "si sigue
+gris, es NO-GO." The verdict is **NO-GO**.
+
+The §12.4 prediction was confirmed in full, mechanism included: A1's
+`gotchas.md` line for repo_02 reads "MUST return >= 1 … the trailing
+`days.max(1)` clamp enforces this — keep it as the last step", it names
+`lead_time_days`, which survives the signature drift, and A1 applied it.
+Recorded as pre-registered evidence, not as post-hoc explanation.
+
+### 13.3 The finding that outranks the verdict: recall cannot retrieve an orphaned memory
+
+In repo_03 (rename drift) A2 called `recall` on `src/billing.rs`,
+`issue_number`, `NEXT_INVOICE` and `format_invoice`. **Every call returned
+`count: 0`.** It never queried `render_invoice`, the dead name, and had no
+way to know it. The orphaned memory was never retrieved, so the freshness
+classifier never ran on it: A2 solved repo_03 without its memory. The one
+repo built to exercise `orphaned` + re-anchor candidates exercised nothing.
+
+The cause is in the product, not the materials. `scope_matches`
+(`src/mcp.rs:611-616`) is exact string equality on the stored scope:
+
+```rust
+Scope::File(p) => p == target,
+Scope::Symbol(s) => s == target,
+```
+
+A memory anchored to a symbol is therefore invisible to a file-scoped
+query, and after a rename it is invisible to every name an agent can know.
+Confirmed in repo_02 as well: `recall("src/logistics.rs")` returned
+`count: 0` while `recall("lead_time_days")` returned the memory — it worked
+only because the signature drift left the *name* intact.
+
+Stated plainly: **retrieval succeeds exactly when the anchor name is
+unchanged, which is exactly when freshness classification has nothing to
+contribute.** The layer the thesis is about sits behind a lookup that fails
+first. This is a defect of the system under test, uncovered by the
+experiment, and it is prior to the B2 materials problem: even perfect
+materials could not have measured the freshness layer through this
+retrieval path.
+
+### 13.4 Other observations, not gating
+
+- `git archaeology` 0/6 in A0, as in the probe. A0 measures unaided local
+  reasoning, not `grep`/`git log` archaeology; the buried-C2-commit fix of
+  the generator redesign was never exercised by any arm.
+- A2 used the new verification window correctly in repo_02: it read the
+  anchored file *before* acting on an `evolved` recall. False confidence 0/6.
+- A0's violating fix in repo_02-task_2 was
+  `lead_time_days(route_km, priority) - credit_days as i64`, the wrong fix
+  verbatim: the subtraction bypasses the clamp. Primary passed, oracle failed.
