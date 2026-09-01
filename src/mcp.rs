@@ -18,6 +18,7 @@ use crate::cache::{Cache, JsonCache};
 use crate::graph::Graph;
 use crate::memory::anchor::{self, classify, Classification, ReanchorBasis};
 use crate::memory::model::{AnchorKey, Kind, Memory, MemoryId, Provenance, Scope};
+use crate::memory::paths;
 use crate::memory::store::{Event, MemoryStore};
 use crate::memory::testgen::{self, Assertion};
 use crate::query;
@@ -359,7 +360,7 @@ impl ServerState {
                     .iter()
                     .filter_map(|m| {
                         let classification = classify(&m.anchor, &self.graph);
-                        reach(m, target, &classification, &self.graph)
+                        reach(m, target, &classification, &self.graph, &self.dir)
                             .map(|reach| memory_view(m, &classification, reach))
                     })
                     .collect();
@@ -406,7 +407,7 @@ impl ServerState {
                             "no symbol '{fqn}' in the current index; the anchor must exist{hint}"
                         ))
                     })?;
-                let anchor = anchor::anchor_of(node);
+                let anchor = anchor::anchor_of(node, &self.dir);
                 let count = self
                     .memory_store
                     .load_events()
@@ -440,7 +441,7 @@ impl ServerState {
                 let memory_id = required_str(args, "memory_id")?;
                 let chosen = required_str(args, "chosen_fqn")?;
                 let memory = self.find_memory(memory_id)?;
-                let anchor = anchor::confirm(&memory.anchor, chosen, &self.graph)
+                let anchor = anchor::confirm(&memory.anchor, chosen, &self.graph, &self.dir)
                     .map_err(|e| ToolError::BadArg(format!("cannot reanchor {memory_id}: {e}")))?;
                 self.memory_store
                     .append(&Event::Reanchored {
@@ -613,7 +614,7 @@ fn parse_kind(s: &str) -> Option<Kind> {
 
 fn scope_matches(scope: &Scope, target: &str) -> bool {
     match scope {
-        Scope::File(p) => p == target,
+        Scope::File(p) => paths::matches(p, target),
         Scope::Symbol(s) => s == target,
     }
 }
@@ -635,10 +636,11 @@ fn reach(
     target: &str,
     classification: &Classification,
     graph: &Graph,
+    root: &Path,
 ) -> Option<Reach> {
     if scope_matches(&memory.scope, target) {
         Some(Reach::Scope)
-    } else if matches_file(&memory.anchor, target, graph) {
+    } else if matches_file(&memory.anchor, target, graph, root) {
         Some(Reach::File)
     } else if proposes(classification, target) {
         Some(Reach::Candidate)
@@ -648,17 +650,17 @@ fn reach(
 }
 
 /// The file the anchored symbol occupies in the current index, or the one
-/// recorded with the anchor. An empty recorded file matches nothing.
-fn matches_file(anchor: &AnchorKey, target: &str, graph: &Graph) -> bool {
-    if target.is_empty() {
-        return false;
-    }
-    let current = graph
+/// recorded with the anchor. Both sides are read as index-relative paths, so a
+/// live `Node::file` (an absolute machine path) is comparable to the path a
+/// caller types. An empty recorded file matches nothing.
+fn matches_file(anchor: &AnchorKey, target: &str, graph: &Graph, root: &Path) -> bool {
+    let live = graph
         .nodes()
         .iter()
         .find(|n| n.fqn == anchor.fqn)
-        .map(|n| n.file.as_str());
-    current == Some(target) || (!anchor.file.is_empty() && anchor.file == target)
+        .map(|n| paths::relative(&n.file, root));
+    live.is_some_and(|f| paths::matches(&f, target))
+        || paths::matches(&paths::relative(&anchor.file, root), target)
 }
 
 /// Only hash-based candidates are searchable. Token similarity is a 0.5
@@ -855,7 +857,7 @@ mod tests {
         s.graph = graph;
         s.memory_store
             .append(&Event::Created {
-                memory: anchored_memory(anchor::anchor_of(before)),
+                memory: anchored_memory(anchor::anchor_of(before, &dir.0)),
             })
             .expect("append");
         s
