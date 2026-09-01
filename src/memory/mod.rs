@@ -3,5 +3,6 @@
 
 pub mod anchor;
 pub mod model;
+pub mod paths;
 pub mod store;
 pub mod testgen;
