@@ -19,6 +19,7 @@ pub fn anchor_of(node: &Node) -> AnchorKey {
         fqn: node.fqn.clone(),
         sig_hash: node.sig_hash.clone(),
         shape_hash: sig::shape_hash(&node.name, &node.signature),
+        file: node.file.clone(),
     }
 }
 
@@ -258,6 +259,8 @@ mod tests {
             sig::shape_hash("compute", &node.signature)
         );
         assert_ne!(anchor.shape_hash, anchor.sig_hash);
+        assert_eq!(anchor.file, node.file);
+        assert!(!anchor.file.is_empty());
     }
 
     #[test]
@@ -452,6 +455,7 @@ mod tests {
             fqn: "vanished".to_string(),
             sig_hash: "nomatch0000000000".to_string(),
             shape_hash: String::new(),
+            file: String::new(),
         };
         assert_eq!(classify(&anchor, &after), Classification::Orphaned);
     }
