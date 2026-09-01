@@ -22,6 +22,15 @@ const BEFORE: &str = "pub fn compute(x: i32) -> i32 {\n    x + 1\n}\n";
 // only the signature, so a body-only change would still classify as Intact.
 const AFTER: &str = "pub fn compute(x: i64) -> i64 {\n    -1\n}\n";
 const INVARIANT: &str = "return value is always positive";
+// Pilot 2's repo_03, minus the noise: a rename that keeps the signature shape.
+const BILLING_BEFORE: &str = "pub fn render_invoice(id: u32) -> String {
+    format!(\"invoice {id}\")
+}
+";
+const BILLING_AFTER: &str = "pub fn format_invoice(id: u32) -> String {
+    format!(\"invoice {id}\")
+}
+";
 const VIOLATION: &str =
     "invariant violated for `compute`: return value is always positive (got -1)";
 
@@ -107,7 +116,7 @@ fn full_memory_lifecycle() {
     let memory = Memory {
         id: MemoryId("test-inv".into()),
         content: INVARIANT.into(),
-        anchor: anchor::anchor_of(compute),
+        anchor: anchor::anchor_of(compute, repo.path()),
         scope: Scope::Symbol("compute".into()),
         kind: Kind::Invariant,
         provenance: Provenance::default(),
@@ -149,14 +158,15 @@ fn full_memory_lifecycle() {
     // 5. Confirm the re-anchor onto the evolved interface. Only what the
     // classifier proposed is accepted.
     assert_eq!(
-        anchor::confirm(&recalled[0].anchor, "other", &drifted),
+        anchor::confirm(&recalled[0].anchor, "other", &drifted, repo.path()),
         Err(ConfirmError::NotProposed {
             fqn: "compute".into(),
             chosen: "other".into(),
             candidates: vec!["compute".into()],
         })
     );
-    let new_anchor = anchor::confirm(&recalled[0].anchor, "compute", &drifted).expect("confirm");
+    let new_anchor =
+        anchor::confirm(&recalled[0].anchor, "compute", &drifted, repo.path()).expect("confirm");
     assert_ne!(new_anchor.sig_hash, memory.anchor.sig_hash);
     store
         .append(&Event::Reanchored {
@@ -250,6 +260,11 @@ impl McpSession {
         let (is_error, text) = self.tool(name, arguments);
         assert!(!is_error, "{name} should succeed, got: {text}");
         text
+    }
+
+    fn recall(&mut self, target: &str) -> Value {
+        let text = self.ok("recall", json!({ "target": target }));
+        serde_json::from_str(&text).expect("recall returns json")
     }
 
     fn err(&mut self, name: &str, arguments: Value) -> String {
@@ -391,4 +406,78 @@ fn lifecycle_over_mcp() {
     assert!(matches!(events[0], Event::Created { .. }));
     assert!(matches!(events[1], Event::Reanchored { .. }));
     assert!(matches!(events[2], Event::Superseded { .. }));
+}
+
+/// The path a memory records has to be the one a caller can type. Only the real
+/// builder produces `Node::file`, and only as an absolute machine path — a
+/// hand-built `Node` is exactly how this went unnoticed — so the whole route
+/// runs here: index on disk, remember over MCP, recall by the relative path.
+#[test]
+fn recall_reaches_a_memory_by_the_relative_path_of_its_file() {
+    let repo = TempCrate::new("paths", BILLING_BEFORE);
+    rebuild(repo.path());
+    let mut mcp = McpSession::start(repo.path());
+    mcp.ok(
+        "remember",
+        json!({ "anchor": "render_invoice", "kind": "gotcha", "content": "ids are 1-based" }),
+    );
+
+    // What lands on disk is relative to the index root, never a machine path.
+    let log_path = repo.path().join("codegraph-memory.jsonl");
+    let log = fs::read_to_string(&log_path).expect("read memory log");
+    assert!(log.contains(r#""file":"src/lib.rs""#), "{log}");
+
+    // The file query works however the caller spells it, including a path
+    // rooted further up than the index.
+    for target in [
+        "src/lib.rs",
+        "src\\lib.rs",
+        "./src/lib.rs",
+        "workspace/demo-crate/src/lib.rs",
+    ] {
+        let out = mcp.recall(target);
+        assert_eq!(out["count"], 1, "recall({target}): {out}");
+        assert_eq!(out["memories"][0]["anchor"]["file"], "src/lib.rs");
+        assert_eq!(
+            out["memories"][0]["reached_via"],
+            "file of anchored symbol render_invoice"
+        );
+    }
+    // A bare name is not a path suffix worth honouring: it would drag in every
+    // same-named file in the tree.
+    assert_eq!(mcp.recall("lib.rs")["count"], 0);
+    assert_eq!(mcp.recall("src/other.rs")["count"], 0);
+
+    // The anchored name dies; the file still reaches the memory.
+    repo.write_lib(BILLING_AFTER);
+    rebuild(repo.path());
+    let out = mcp.recall("src/lib.rs");
+    assert_eq!(out["count"], 1, "{out}");
+    assert_eq!(out["memories"][0]["status"], "orphaned");
+
+    // A confirmed re-anchor records the file the same way.
+    mcp.ok(
+        "reanchor",
+        json!({ "memory_id": "mem-0", "chosen_fqn": "format_invoice" }),
+    );
+    let out = mcp.recall("src/lib.rs");
+    assert_eq!(out["count"], 1, "{out}");
+    assert_eq!(out["memories"][0]["status"], "intact");
+    assert_eq!(out["memories"][0]["anchor"]["file"], "src/lib.rs");
+    mcp.close();
+
+    // No event, written by either path, carries an absolute path.
+    let events = MemoryStore::new(repo.path())
+        .load_events()
+        .expect("load events");
+    assert_eq!(events.len(), 2);
+    for event in &events {
+        let anchor = match event {
+            Event::Created { memory } => &memory.anchor,
+            Event::Reanchored { anchor, .. } => anchor,
+            Event::Superseded { .. } => continue,
+        };
+        assert_eq!(anchor.file, "src/lib.rs", "{event:?}");
+        assert!(!Path::new(&anchor.file).is_absolute(), "{event:?}");
+    }
 }
