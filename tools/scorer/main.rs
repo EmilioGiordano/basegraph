@@ -47,8 +47,8 @@ pub fn render_table(runs: &[RunRecord]) -> String {
         (&a.repo_id, &a.task_id, a.arm, a.seed).cmp(&(&b.repo_id, &b.task_id, b.arm, b.seed))
     });
     let mut out = String::from(
-        "| Repo | Task | Arm | Seed | Drift | Oracle passes | Fix passes | Freshness seen (A2) | Read gotchas (A1) | git archaeology | False confidence | Tokens | Time (s) | Notes |\n\
-         |---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
+        "| Repo | Task | Arm | Seed | Drift | Oracle passes | Fix passes | Freshness seen (A2) | Read gotchas (A1) | git archaeology | Verified current code | False confidence | Tokens | Time (s) | Notes |\n\
+         |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n",
     );
     for r in rows {
         let oracle = match r.violation {
@@ -80,8 +80,17 @@ pub fn render_table(runs: &[RunRecord]) -> String {
             _ => "-",
         };
         let yes_no = |b: bool| if b { "yes" } else { "no" };
+        let verified = if !r.instrumentation.stale_material_seen {
+            "-"
+        } else if r.instrumentation.verified_before_stale {
+            "before"
+        } else if r.instrumentation.verified_after_stale {
+            "after"
+        } else {
+            "no"
+        };
         out.push_str(&format!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {:.0} | {} |\n",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {:.0} | {} |\n",
             r.repo_id,
             r.task_id,
             r.arm.label(),
@@ -92,6 +101,7 @@ pub fn render_table(runs: &[RunRecord]) -> String {
             freshness,
             gotchas,
             yes_no(r.instrumentation.git_archaeology),
+            verified,
             yes_no(r.false_confidence),
             r.tokens,
             r.time_secs,

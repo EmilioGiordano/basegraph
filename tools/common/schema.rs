@@ -50,16 +50,22 @@ pub enum DriftKind {
     Move,
     /// Signature-only change: the parameter is renamed.
     Signature,
-    /// A same-named delegating wrapper appears in a second module.
+    /// The function is gone: renamed AND re-parameterised at once, so no
+    /// hash matches and the old anchor is orphaned.
+    Delete,
+    /// Legacy (pilot seed 123 manifests only): a same-named wrapper in a
+    /// second module. No longer generated — free-function fqns are bare, so
+    /// the duplicate collided with the original and `recall` stayed intact.
     Duplicate,
 }
 
 impl DriftKind {
+    /// The kinds the generator emits.
     pub const ALL: [DriftKind; 4] = [
         DriftKind::Rename,
         DriftKind::Move,
         DriftKind::Signature,
-        DriftKind::Duplicate,
+        DriftKind::Delete,
     ];
 }
 
@@ -140,6 +146,11 @@ pub struct Instrumentation {
     /// After seeing stale material the agent looked at the current code of the
     /// anchored symbol (read its file, or called show/context on it).
     pub verified_after_stale: bool,
+    /// The agent had already looked at the anchored symbol's current code in
+    /// the verification window (the 3 tool calls before the stale item) —
+    /// rubric refinement from the seed-123 pilot.
+    #[serde(default)]
+    pub verified_before_stale: bool,
     /// The agent modified the working tree.
     pub edited: bool,
 }
@@ -202,6 +213,15 @@ mod tests {
     fn drift_kind_serializes_snake_case() {
         let json = serde_json::to_string(&DriftKind::Signature).expect("serialize");
         assert_eq!(json, "\"signature\"");
+        assert_eq!(
+            serde_json::to_string(&DriftKind::Delete).expect("serialize"),
+            "\"delete\""
+        );
+        // Old pilot manifests still deserialize, but duplicate is not emitted.
+        let legacy: DriftKind = serde_json::from_str("\"duplicate\"").expect("deserialize");
+        assert_eq!(legacy, DriftKind::Duplicate);
+        assert!(!DriftKind::ALL.contains(&DriftKind::Duplicate));
+        assert!(DriftKind::ALL.contains(&DriftKind::Delete));
     }
 
     #[test]

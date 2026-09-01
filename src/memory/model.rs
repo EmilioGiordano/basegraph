@@ -21,6 +21,12 @@ pub struct AnchorKey {
     /// detection, and an empty value never matches — see the classifier).
     #[serde(default)]
     pub shape_hash: String,
+    /// File the symbol lived in when the memory was written, so an anchor that
+    /// becomes unreachable by name is still reachable by file. Same precedent
+    /// as `shape_hash`: defaulted for older logs, and an empty value never
+    /// matches a query.
+    #[serde(default)]
+    pub file: String,
 }
 
 /// What kind of knowledge a memory captures.
@@ -86,6 +92,7 @@ mod tests {
                 fqn: "graph::Graph::neighbors".into(),
                 sig_hash: "b4d44c6b030939fa".into(),
                 shape_hash: "a1b2c3d4e5f60718".into(),
+                file: "src/graph.rs".into(),
             },
             scope: Scope::Symbol("graph::Graph::neighbors".into()),
             kind: Kind::Invariant,
@@ -110,6 +117,15 @@ mod tests {
         let json = serde_json::to_string(&mem).expect("serialize");
         let back: Memory = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(mem, back);
+    }
+
+    #[test]
+    fn anchors_written_before_the_added_fields_still_load() {
+        let json = r#"{"fqn":"old::sym","sig_hash":"b4d44c6b030939fa"}"#;
+        let anchor: AnchorKey = serde_json::from_str(json).expect("deserialize");
+        assert_eq!(anchor.fqn, "old::sym");
+        assert!(anchor.shape_hash.is_empty());
+        assert!(anchor.file.is_empty());
     }
 
     #[test]

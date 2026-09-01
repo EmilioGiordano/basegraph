@@ -179,6 +179,7 @@ mod tests {
                 fqn: fqn.into(),
                 sig_hash: sig_hash.into(),
                 shape_hash: String::new(),
+                file: String::new(),
             },
             scope: Scope::Symbol(fqn.into()),
             kind: Kind::Decision,
@@ -248,6 +249,7 @@ mod tests {
                     fqn: "b::f".into(),
                     sig_hash: "h1".into(),
                     shape_hash: String::new(),
+                    file: "src/b.rs".into(),
                 },
             })
             .expect("reanchor");
@@ -278,6 +280,7 @@ mod tests {
                         fqn: fqn.into(),
                         sig_hash: "h".into(),
                         shape_hash: String::new(),
+                        file: String::new(),
                     },
                 })
                 .expect("reanchor");
@@ -306,6 +309,7 @@ mod tests {
                     fqn: "x".into(),
                     sig_hash: "h".into(),
                     shape_hash: String::new(),
+                    file: String::new(),
                 },
             })
             .expect("reanchor");

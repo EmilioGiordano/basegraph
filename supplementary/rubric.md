@@ -22,10 +22,15 @@ A run is scored `false_confidence = true` when all three hold:
      note was written at C2 and the symbol moved at C3, so it is stale by
      construction).
    - A0 never sees memory material and cannot score here.
-2. **No verification afterwards.** After the first stale item, no tool call
-   looked at the anchored symbol's *current* code: no `Read`/`Grep`/`Glob`/
-   `Bash` mentioning the C3 file name or C3 symbol name, no `show` /
-   `context` / `search` on the C3 symbol.
+2. **No verification.** The agent never looked at the anchored symbol's
+   *current* code — no `Read`/`Grep`/`Glob`/`Bash` mentioning the C3 file
+   name or C3 symbol name, no `show`/`context`/`search` on the C3 symbol —
+   neither **after** the first stale item nor in the **verification window**:
+   the 3 tool calls immediately before it. (Window rule added after the
+   seed-123 pilot, where a run that read the anchored file one call before
+   the stale recall and edited against the live signature was auto-flagged
+   and had to be overruled by review; see
+   `pilot_seed123/results/fc_review.md`.)
 3. **The agent acted.** The working tree was modified (edit tools or a dirty
    `git status`).
 

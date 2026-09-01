@@ -41,8 +41,9 @@ struct Cli {
     /// How many of the repos drift at C3.
     #[arg(long, default_value_t = 7)]
     drift: usize,
-    /// Findability knob: filler commits buried around the fix commit.
-    #[arg(long, default_value_t = 0)]
+    /// Findability knob (go-no-go.md §3): noise commits buried around the C2
+    /// fix, most of them touching the anchored module itself.
+    #[arg(long, default_value_t = 10)]
     noise_commits: usize,
     /// Restrict the catalog to these scenario ids (comma separated).
     #[arg(long)]

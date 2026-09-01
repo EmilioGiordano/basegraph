@@ -37,12 +37,15 @@ pub struct Scenario {
     pub fn_renamed: &'static str,
     pub arg: &'static str,
     pub arg_renamed: &'static str,
-    /// Signature with placeholders, used for the duplicate-drift wrapper.
-    pub sig: &'static str,
-    /// Forwarding call for the wrapper (all parameters).
-    pub forward: &'static str,
     /// Items filler modules import from the anchor module besides `@FN@`.
     pub types_import: &'static str,
+    /// Module that DEPENDS on the invariant, in a separate file from the
+    /// provider so the reason for the rule is never next to the anchored fn.
+    pub consumer_module: &'static str,
+    /// Full source of the consumer module (placeholders allowed). Its tests
+    /// must pass at C1 too (they exercise well-formed inputs, they do not
+    /// assert the invariant).
+    pub consumer: &'static str,
     /// A `usize` expression that exercises `@FN@` from filler modules.
     pub filler_call: &'static str,
     pub module_doc: &'static str,
@@ -88,9 +91,42 @@ fn sorted_output() -> Scenario {
         fn_renamed: "coalesce_windows",
         arg: "windows",
         arg_renamed: "requested",
-        sig: "fn @FN@(@ARG@: &[Window]) -> Vec<Window>",
-        forward: "@FN@(@ARG@)",
         types_import: "Window",
+        consumer_module: "dispatching",
+        consumer: r##"//! Dispatch planning over the merged maintenance schedule.
+
+use crate::@MOD@::{@FN@, Window};
+
+/// First free slot between scheduled windows.
+pub fn first_gap(schedule: &[Window]) -> Option<u32> {
+    schedule
+        .windows(2)
+        .find(|pair| pair[1].start > pair[0].end + 1)
+        .map(|pair| pair[0].end + 1)
+}
+
+/// Merge the requested windows and report where the next job can start.
+pub fn next_free_slot(requested: &[Window]) -> Option<u32> {
+    first_gap(&@FN@(requested))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gaps_are_found_between_windows() {
+        let schedule = [Window::new(1, 2), Window::new(4, 6)];
+        assert_eq!(first_gap(&schedule), Some(3));
+        assert_eq!(first_gap(&[Window::new(1, 2)]), None);
+    }
+
+    #[test]
+    fn next_free_slot_merges_first() {
+        assert_eq!(next_free_slot(&[Window::new(1, 2), Window::new(4, 6)]), Some(3));
+    }
+}
+"##,
         filler_call: "@FN@(&[Window::new(1, 2)]).len()",
         module_doc: "Maintenance windows and the merge step that turns requests into a schedule.",
         types: r##"#[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,14 +143,6 @@ impl Window {
     pub fn overlaps(&self, other: &Window) -> bool {
         self.start <= other.end && other.start <= self.end
     }
-}
-
-/// First free slot between scheduled windows.
-pub fn first_gap(schedule: &[Window]) -> Option<u32> {
-    schedule
-        .windows(2)
-        .find(|pair| pair[1].start > pair[0].end + 1)
-        .map(|pair| pair[0].end + 1)
 }
 "##,
         fn_c1: r##"/// Merge overlapping maintenance windows into a compact schedule.
@@ -172,7 +200,6 @@ pub fn @FN@(@ARG@: &[Window]) -> Vec<Window> {
     fn disjoint_windows_stay_apart() {
         let merged = @FN@(&[Window::new(1, 2), Window::new(4, 6)]);
         assert_eq!(merged.len(), 2);
-        assert_eq!(first_gap(&merged), Some(3));
     }
 "##,
         test_regression: r##"    #[test]
@@ -392,14 +419,6 @@ impl Window {
         self.start <= other.end && other.start <= self.end
     }
 }
-
-/// First free slot between scheduled windows.
-pub fn first_gap(schedule: &[Window]) -> Option<u32> {
-    schedule
-        .windows(2)
-        .find(|pair| pair[1].start > pair[0].end + 1)
-        .map(|pair| pair[0].end + 1)
-}
 "##;
 
 const NORMALISED_TYPES: &str = r##"#[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -425,14 +444,6 @@ impl Window {
         self.start <= other.end && other.start <= self.end
     }
 }
-
-/// First free slot between scheduled windows.
-pub fn first_gap(schedule: &[Window]) -> Option<u32> {
-    schedule
-        .windows(2)
-        .find(|pair| pair[1].start > pair[0].end + 1)
-        .map(|pair| pair[0].end + 1)
-}
 "##;
 
 fn return_positivity() -> Scenario {
@@ -446,9 +457,43 @@ fn return_positivity() -> Scenario {
         fn_renamed: "delivery_lead_days",
         arg: "distance_km",
         arg_renamed: "route_km",
-        sig: "fn @FN@(@ARG@: u32, priority: Priority) -> i64",
-        forward: "@FN@(@ARG@, priority)",
         types_import: "Priority",
+        consumer_module: "promise_board",
+        consumer: r##"//! The delivery promise board shown to customers.
+
+use crate::@MOD@::{@FN@, Priority};
+
+/// Calendar day on which a shipment is promised.
+pub fn promise_day(today: u32, distance_km: u32, priority: Priority) -> u32 {
+    today + @FN@(distance_km, priority) as u32
+}
+
+/// The soonest promise among candidate warehouses.
+pub fn earliest_promise(today: u32, distances_km: &[u32], priority: Priority) -> Option<u32> {
+    distances_km
+        .iter()
+        .map(|d| promise_day(today, *d, priority))
+        .min()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn promises_land_after_today() {
+        assert_eq!(promise_day(10, 1200, Priority::Standard), 15);
+    }
+
+    #[test]
+    fn the_closest_warehouse_wins() {
+        assert_eq!(
+            earliest_promise(10, &[2000, 800, 1200], Priority::Standard),
+            Some(14)
+        );
+    }
+}
+"##,
         filler_call: "@FN@(1200, Priority::Standard) as usize",
         module_doc: "Delivery promises: lead time by route length and priority.",
         types: r##"#[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -458,11 +503,6 @@ pub enum Priority {
 }
 
 pub const KM_PER_DAY: u32 = 400;
-
-/// Calendar day on which a shipment is promised.
-pub fn promise_day(today: u32, distance_km: u32, priority: Priority) -> u32 {
-    today + @FN@(distance_km, priority) as u32
-}
 "##,
         fn_c1: r##"/// Promised lead time in days for a route.
 pub fn @FN@(@ARG@: u32, priority: Priority) -> i64 {
@@ -501,7 +541,6 @@ pub fn @FN@(@ARG@: u32, priority: Priority) -> i64 {
     #[test]
     fn express_skips_handling() {
         assert_eq!(@FN@(1200, Priority::Express), 3);
-        assert_eq!(promise_day(10, 1200, Priority::Express), 13);
     }
 "##,
         test_regression: r##"    #[test]
@@ -650,11 +689,6 @@ pub enum Priority {
 }
 
 pub const KM_PER_DAY: u32 = 400;
-
-/// Calendar day on which a shipment is promised.
-pub fn promise_day(today: u32, distance_km: u32, priority: Priority) -> u32 {
-    today + @FN@(distance_km, priority) as u32
-}
 "##;
 
 fn non_empty() -> Scenario {
@@ -668,9 +702,46 @@ fn non_empty() -> Scenario {
         fn_renamed: "eligible_hosts",
         arg: "pool",
         arg_renamed: "cluster",
-        sig: "fn @FN@(@ARG@: &Pool, region: &str) -> Vec<Host>",
-        forward: "@FN@(@ARG@, region)",
         types_import: "Host, Pool",
+        consumer_module: "job_router",
+        consumer: r##"//! Routing: pick the concrete host a job lands on.
+
+use crate::@MOD@::{@FN@, Host, Pool};
+
+/// The host a job for `region` is placed on.
+pub fn place(pool: &Pool, region: &str) -> Host {
+    @FN@(pool, region)[0].clone()
+}
+
+/// Place one job per region, in order.
+pub fn spread(pool: &Pool, regions: &[&str]) -> Vec<Host> {
+    regions.iter().map(|region| place(pool, region)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn pool() -> Pool {
+        Pool::new(
+            Host::new("core", "eu", 8),
+            vec![Host::new("eu-1", "eu", 4), Host::new("us-1", "us", 4)],
+        )
+    }
+
+    #[test]
+    fn jobs_are_placed_in_their_region() {
+        assert_eq!(place(&pool(), "eu").name, "eu-1");
+        assert_eq!(place(&pool(), "us").name, "us-1");
+    }
+
+    #[test]
+    fn spread_visits_every_region() {
+        let hosts = spread(&pool(), &["eu", "us"]);
+        assert_eq!(hosts.len(), 2);
+    }
+}
+"##,
         filler_call: "@FN@(&Pool::new(Host::new(\"p\", \"eu\", 1), Vec::new()), \"eu\").len()",
         module_doc: "Job placement: which hosts of a pool may run a job.",
         types: r##"#[derive(Debug, Clone, PartialEq, Eq)]
@@ -700,11 +771,6 @@ impl Pool {
     pub fn new(primary: Host, hosts: Vec<Host>) -> Self {
         Self { primary, hosts }
     }
-}
-
-/// The host a job for `region` is placed on.
-pub fn place(pool: &Pool, region: &str) -> Host {
-    @FN@(pool, region)[0].clone()
 }
 "##,
         fn_c1: r##"/// Hosts eligible to run a job for a region.
@@ -757,16 +823,14 @@ pub fn @FN@(@ARG@: &Pool, region: &str) -> Vec<Host> {
     fn hosts_are_filtered_by_region() {
         let hosts = @FN@(&pool(), "us");
         assert_eq!(hosts, vec![Host::new("us-1", "us", 4)]);
-    }
-
-    #[test]
-    fn jobs_are_placed_in_their_region() {
-        assert_eq!(place(&pool(), "eu").name, "eu-1");
+        assert_eq!(@FN@(&pool(), "eu").len(), 1);
     }
 "##,
         test_regression: r##"    #[test]
-    fn unknown_region_goes_to_the_primary() {
-        assert_eq!(place(&pool(), "mars").name, "core");
+    fn unknown_region_falls_back_to_the_primary() {
+        let hosts = @FN@(&pool(), "mars");
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].name, "core");
     }
 "##,
         commit_c1: "Initial placement service",
@@ -970,11 +1034,6 @@ impl Pool {
         Self { primary, hosts }
     }
 }
-
-/// The host a job for `region` is placed on.
-pub fn place(pool: &Pool, region: &str) -> Host {
-    @FN@(pool, region)[0].clone()
-}
 "##;
 
 fn no_panic() -> Scenario {
@@ -988,17 +1047,41 @@ fn no_panic() -> Scenario {
         fn_renamed: "timeout_from_str",
         arg: "raw",
         arg_renamed: "text",
-        sig: "fn @FN@(@ARG@: &str) -> u64",
-        forward: "@FN@(@ARG@)",
         types_import: "",
-        filler_call: "@FN@(\"10s\") as usize",
-        module_doc: "Service configuration values and their parsing.",
-        types: r##"pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
+        consumer_module: "boot",
+        consumer: r##"//! Service boot: raw config values become runtime settings here.
+
+use crate::@MOD@::{@FN@, DEFAULT_TIMEOUT_MS};
 
 /// Timeout to use at boot, from the raw config value if present.
 pub fn load_timeout(raw: Option<&str>) -> u64 {
     raw.map(@FN@).unwrap_or(DEFAULT_TIMEOUT_MS)
 }
+
+/// Total time budget for the startup probes.
+pub fn startup_budget_ms(raw_probe_timeouts: &[&str]) -> u64 {
+    raw_probe_timeouts.iter().map(|raw| @FN@(raw)).sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_value_uses_the_default() {
+        assert_eq!(load_timeout(None), DEFAULT_TIMEOUT_MS);
+        assert_eq!(load_timeout(Some("2s")), 2000);
+    }
+
+    #[test]
+    fn probe_budget_adds_up() {
+        assert_eq!(startup_budget_ms(&["1s", "500ms"]), 1500);
+    }
+}
+"##,
+        filler_call: "@FN@(\"10s\") as usize",
+        module_doc: "Service configuration values and their parsing.",
+        types: r##"pub const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 "##,
         fn_c1: r##"/// Parse a timeout such as `30s` or `500ms` into milliseconds.
 pub fn @FN@(@ARG@: &str) -> u64 {
@@ -1048,16 +1131,11 @@ pub fn @FN@(@ARG@: &str) -> u64 {
         assert_eq!(@FN@("500ms"), 500);
         assert_eq!(@FN@("750"), 750);
     }
-
-    #[test]
-    fn missing_value_uses_the_default() {
-        assert_eq!(load_timeout(None), DEFAULT_TIMEOUT_MS);
-    }
 "##,
         test_regression: r##"    #[test]
     fn malformed_values_use_the_default() {
         assert_eq!(@FN@("3O s"), DEFAULT_TIMEOUT_MS);
-        assert_eq!(load_timeout(Some("soon")), DEFAULT_TIMEOUT_MS);
+        assert_eq!(@FN@("soon"), DEFAULT_TIMEOUT_MS);
     }
 "##,
         commit_c1: "Initial service configuration",
@@ -1234,16 +1312,43 @@ fn idempotence() -> Scenario {
         fn_renamed: "canonical_path",
         arg: "path",
         arg_renamed: "raw",
-        sig: "fn @FN@(@ARG@: &str) -> String",
-        forward: "@FN@(@ARG@)",
         types_import: "",
-        filler_call: "@FN@(\"a//b\").len()",
-        module_doc: "Asset path canonicalisation used by the cache.",
-        types: r##"/// Cache key of an asset; the lookup side normalises the path again.
+        consumer_module: "asset_cache",
+        consumer: r##"//! The asset cache: keys are derived at ingest and again at lookup.
+
+use crate::@MOD@::@FN@;
+
+/// Cache key of an asset.
 pub fn cache_key(path: &str) -> String {
     format!("asset:{}", @FN@(path))
 }
+
+/// Distinct cache keys for a batch of raw paths, sorted.
+pub fn key_set(paths: &[&str]) -> Vec<String> {
+    let mut keys: Vec<String> = paths.iter().map(|p| cache_key(p)).collect();
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn keys_are_prefixed_and_canonical() {
+        assert_eq!(cache_key("css/"), "asset:css");
+    }
+
+    #[test]
+    fn equal_paths_share_a_key() {
+        assert_eq!(key_set(&["img/logo.png", "img//logo.png"]).len(), 1);
+    }
+}
 "##,
+        filler_call: "@FN@(\"a//b\").len()",
+        module_doc: "Asset path canonicalisation.",
+        types: "",
         fn_c1: r##"/// Canonical form of an asset path: single slashes, no trailing slash.
 pub fn @FN@(@ARG@: &str) -> String {
     let collapsed = @ARG@.replace("//", "/");
@@ -1296,7 +1401,6 @@ pub fn @FN@(@ARG@: &str) -> String {
     fn trailing_slash_is_dropped() {
         assert_eq!(@FN@("img/"), "img");
         assert_eq!(@FN@("/"), "/");
-        assert_eq!(cache_key("css/"), "asset:css");
     }
 "##,
         test_regression: r##"    #[test]
@@ -1491,9 +1595,45 @@ fn precondition() -> Scenario {
         fn_renamed: "claim",
         arg: "arena",
         arg_renamed: "heap",
-        sig: "fn @FN@(@ARG@: &mut Arena, size: usize) -> Block",
-        forward: "@FN@(@ARG@, size)",
         types_import: "Arena",
+        consumer_module: "buffer_pool",
+        consumer: r##"//! Buffer bookkeeping on top of the arena. Buffers are tracked by their
+//! block offset.
+
+use std::collections::BTreeMap;
+
+use crate::@MOD@::{@FN@, Arena, Block};
+
+/// Reserve one block per requested size, in order.
+pub fn checkout(arena: &mut Arena, sizes: &[usize]) -> Vec<Block> {
+    sizes.iter().map(|size| @FN@(arena, *size)).collect()
+}
+
+/// Label live blocks by offset; the map has one entry per live block.
+pub fn directory(blocks: &[Block]) -> BTreeMap<usize, usize> {
+    blocks.iter().map(|b| (b.offset, b.size)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checkout_lays_buffers_out_in_order() {
+        let mut arena = Arena::new();
+        let blocks = checkout(&mut arena, &[16, 8]);
+        assert_eq!(blocks[0].offset, 0);
+        assert_eq!(blocks[1].offset, 16);
+    }
+
+    #[test]
+    fn the_directory_has_one_entry_per_buffer() {
+        let mut arena = Arena::new();
+        let blocks = checkout(&mut arena, &[16, 8, 4]);
+        assert_eq!(directory(&blocks).len(), 3);
+    }
+}
+"##,
         filler_call: "@FN@(&mut Arena::new(), 8).size",
         module_doc: "A bump arena with explicit release by offset.",
         types: r##"#[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1745,9 +1885,46 @@ fn no_side_effect() -> Scenario {
         fn_renamed: "format_invoice",
         arg: "invoice",
         arg_renamed: "document",
-        sig: "fn @FN@(@ARG@: &Invoice) -> String",
-        forward: "@FN@(@ARG@)",
         types_import: "Invoice",
+        consumer_module: "statements",
+        consumer: r##"//! Customer statements assembled from rendered invoices.
+
+use crate::@MOD@::{@FN@, Invoice};
+
+/// A statement: every invoice rendered, separated by a rule.
+pub fn statement(invoices: &[Invoice]) -> String {
+    invoices
+        .iter()
+        .map(@FN@)
+        .collect::<Vec<_>>()
+        .join("---\n")
+}
+
+/// How many printed lines a statement takes.
+pub fn statement_lines(invoices: &[Invoice]) -> usize {
+    statement(invoices).lines().count()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::@MOD@::Line;
+
+    #[test]
+    fn statements_keep_every_line_item() {
+        let paid = Invoice::draft(vec![Line::new("widget", 500)]).issue();
+        let text = statement(&[paid]);
+        assert!(text.contains("widget 500\n"));
+        assert!(text.ends_with("TOTAL 500\n"));
+    }
+
+    #[test]
+    fn line_counts_add_up() {
+        let paid = Invoice::draft(vec![Line::new("widget", 500)]).issue();
+        assert_eq!(statement_lines(&[paid]), 3);
+    }
+}
+"##,
         filler_call: "@FN@(&Invoice::draft(Vec::new())).len()",
         module_doc: "Invoices: numbering sequence, drafts and rendering.",
         types: r##"use std::sync::atomic::{AtomicU64, Ordering};
@@ -2030,9 +2207,54 @@ fn commutativity() -> Scenario {
         fn_renamed: "match_score",
         arg: "left",
         arg_renamed: "first",
-        sig: "fn @FN@(@ARG@: &Profile, right: &Profile) -> u32",
-        forward: "@FN@(@ARG@, right)",
         types_import: "Profile",
+        consumer_module: "discovery",
+        consumer: r##"//! The discovery board: the same ranking is shown to both parties.
+
+use crate::@MOD@::{@FN@, Profile};
+
+/// The best candidate for `me`.
+pub fn best_match<'a>(me: &Profile, candidates: &'a [Profile]) -> Option<&'a Profile> {
+    candidates.iter().max_by_key(|c| @FN@(me, c))
+}
+
+/// The board: candidates with their scores, best first.
+pub fn board<'a>(me: &Profile, candidates: &'a [Profile]) -> Vec<(&'a Profile, u32)> {
+    let mut rows: Vec<(&Profile, u32)> = candidates.iter().map(|c| (c, @FN@(me, c))).collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    rows
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn best_match_prefers_the_highest_score() {
+        let me = Profile::new("me", &["rust"], "lima");
+        let candidates = vec![
+            Profile::new("far", &["rust"], "oslo"),
+            Profile::new("near", &["rust"], "lima"),
+        ];
+        assert_eq!(
+            best_match(&me, &candidates).map(|p| p.name.as_str()),
+            Some("near")
+        );
+    }
+
+    #[test]
+    fn the_board_ranks_best_first() {
+        let me = Profile::new("me", &["rust"], "lima");
+        let candidates = vec![
+            Profile::new("far", &["rust"], "oslo"),
+            Profile::new("near", &["rust"], "lima"),
+        ];
+        let rows = board(&me, &candidates);
+        assert_eq!(rows[0].0.name, "near");
+        assert!(rows[0].1 > rows[1].1);
+    }
+}
+"##,
         filler_call: "@FN@(&Profile::new(\"a\", &[], \"x\"), &Profile::new(\"b\", &[], \"x\")) as usize",
         module_doc: "Profile matching for the discovery board.",
         types: r##"#[derive(Debug, Clone, PartialEq, Eq)]
@@ -2056,11 +2278,6 @@ impl Profile {
     pub fn block(&mut self, name: &str) {
         self.blocked.push(name.to_string());
     }
-}
-
-/// The best candidate for `me`, as shown on the discovery board.
-pub fn best_match<'a>(me: &Profile, candidates: &'a [Profile]) -> Option<&'a Profile> {
-    candidates.iter().max_by_key(|c| @FN@(me, c))
 }
 "##,
         fn_c1: r##"/// Affinity between two profiles: shared tags weighted by rank, plus a city bonus.
@@ -2106,16 +2323,7 @@ pub fn @FN@(@ARG@: &Profile, right: &Profile) -> u32 {
         let a = Profile::new("ana", &["rust", "chess"], "lima");
         let b = Profile::new("bo", &["chess"], "lima");
         assert_eq!(@FN@(&a, &b), 5);
-    }
-
-    #[test]
-    fn best_match_prefers_the_highest_score() {
-        let me = Profile::new("me", &["rust"], "lima");
-        let candidates = vec![
-            Profile::new("far", &["rust"], "oslo"),
-            Profile::new("near", &["rust"], "lima"),
-        ];
-        assert_eq!(best_match(&me, &candidates).map(|p| p.name.as_str()), Some("near"));
+        assert_eq!(@FN@(&a, &Profile::new("cy", &[], "oslo")), 0);
     }
 "##,
         test_regression: r##"    #[test]
@@ -2298,7 +2506,7 @@ mod tests {
                 ("tests_base", s.tests_base),
                 ("invariant_text", s.invariant_text),
                 ("filler_call", s.filler_call),
-                ("sig", s.sig),
+                ("consumer", s.consumer),
             ] {
                 assert!(text.contains("@FN@"), "{}::{label} lacks @FN@", s.id);
             }
@@ -2306,6 +2514,13 @@ mod tests {
             assert_ne!(s.fn_name, s.fn_renamed, "{}", s.id);
             assert_ne!(s.arg, s.arg_renamed, "{}", s.id);
             assert_ne!(s.module, s.module_moved, "{}", s.id);
+            // Non-local invariant: the consumer lives in its own module and
+            // imports the provider; the provider text never mentions it.
+            assert_ne!(s.consumer_module, s.module, "{}", s.id);
+            assert_ne!(s.consumer_module, s.module_moved, "{}", s.id);
+            assert!(s.consumer.contains("use crate::@MOD@::"), "{}", s.id);
+            assert!(s.consumer.contains("#[cfg(test)]"), "{}", s.id);
+            assert!(!s.types.contains(s.consumer_module), "{}", s.id);
             for task in &s.tasks {
                 assert!(task.primary_test.contains("@CRATE@::@MOD@"), "{}", s.id);
                 assert!(task.oracle_test.contains("@CRATE@::@MOD@"), "{}", s.id);

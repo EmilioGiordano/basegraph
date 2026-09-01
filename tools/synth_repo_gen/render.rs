@@ -45,15 +45,18 @@ impl Stage {
     }
 }
 
-pub fn anchor_module(s: &Scenario, stage: Stage, p: &Params) -> String {
+/// `noise` cosmetic comment lines (0 = none) are inserted under the module
+/// doc; each provider-touching noise commit bumps the count by one.
+pub fn anchor_module(s: &Scenario, stage: Stage, p: &Params, noise: usize) -> String {
     let regression = match stage {
         Stage::C1 => None,
         Stage::C2 | Stage::C3Variant => Some(s.test_regression),
     };
-    compose(s, s.types, stage.anchor_fn(s), "", regression, p)
+    compose(s, s.types, stage.anchor_fn(s), "", regression, p, noise)
 }
 
 /// The module after a reference fix, applied on top of `base_fn` (the C3 fn).
+/// Reference fixes carry no noise lines: they are ground truth, not history.
 pub fn fixed_module(s: &Scenario, base_fn: &str, v: &Variant, p: &Params) -> String {
     compose(
         s,
@@ -62,9 +65,11 @@ pub fn fixed_module(s: &Scenario, base_fn: &str, v: &Variant, p: &Params) -> Str
         v.extras,
         Some(s.test_regression),
         p,
+        0,
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compose(
     s: &Scenario,
     types: &str,
@@ -72,8 +77,16 @@ fn compose(
     extras: &str,
     regression: Option<&str>,
     p: &Params,
+    noise: usize,
 ) -> String {
     let mut out = format!("//! {}\n\n", s.module_doc);
+    for line in PROVIDER_NOISE.iter().take(noise.min(PROVIDER_NOISE.len())) {
+        out.push_str(line);
+        out.push('\n');
+    }
+    if noise > 0 {
+        out.push('\n');
+    }
     out.push_str(types);
     out.push('\n');
     out.push_str(fn_src);
@@ -91,29 +104,35 @@ fn compose(
     p.fill(&out)
 }
 
-pub fn legacy_module_name(module: &str) -> String {
-    format!("legacy_{module}")
+/// The module that depends on the invariant, in its own file (non-local
+/// invariants: the reason for the rule never sits next to the anchored fn).
+pub fn consumer_module(s: &Scenario, p: &Params) -> String {
+    p.fill(s.consumer)
 }
 
-/// Duplicate drift: a same-named forwarding wrapper in a second module.
-pub fn legacy_module(s: &Scenario, p: &Params) -> String {
-    let text = format!(
-        "//! Compatibility shim: the @MOD@ API as kept for callers that have not migrated.\n\n\
-         use crate::@MOD@::*;\n\n\
-         /// Forwarding wrapper; the implementation lives in `@MOD@`.\n\
-         pub {} {{\n    crate::@MOD@::{}\n}}\n",
-        s.sig, s.forward
-    );
-    p.fill(&text)
-}
+/// Innocuous comment lines threaded into the provider module by the noise
+/// commits, so the C2 fix is buried in that file's own history. Filled with
+/// the module name; purely cosmetic, never semantic.
+const PROVIDER_NOISE: &[&str] = &[
+    "// NOTE: keep the public surface of @MOD@ stable; the ops tooling links against it.",
+    "// TODO: revisit the naming in this file once the workspace split lands.",
+    "// Reviewed in the quarterly hardening pass; no functional findings.",
+    "// Style: prefer early returns in new helpers here, matching the rest of the crate.",
+    "// Perf note: nothing in this module is hot; clarity beats micro-optimisation.",
+    "// Docs backlog: examples for the public functions of @MOD@.",
+    "// Cleanup candidate: some helpers predate the 2025 refactor.",
+    "// Observability: counters for this module live in the metrics crate, not here.",
+    "// Compat: callers in the exporter still use the pre-split import paths.",
+    "// Audit trail: threat-model review scheduled for next cycle.",
+    "// Testing: property tests were considered and postponed; see the eng notes.",
+    "// Ownership: this file belongs to the platform rotation.",
+];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FillerRole {
     Plain,
     /// Imports and exercises the anchored function.
     Caller,
-    /// Like `Caller`, but through the duplicate-drift wrapper.
-    LegacyCaller,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -166,12 +185,6 @@ pub fn filler_module(f: &FillerSpec, s: &Scenario, p: &Params) -> String {
     match f.role {
         FillerRole::Plain => {}
         FillerRole::Caller => out.push_str(&format!("use crate::@MOD@::{{@FN@{types}}};\n")),
-        FillerRole::LegacyCaller => {
-            if !s.types_import.is_empty() {
-                out.push_str(&format!("use crate::@MOD@::{{{}}};\n", s.types_import));
-            }
-            out.push_str("use crate::legacy_@MOD@::@FN@;\n");
-        }
     }
     if let Some(prev) = &f.prev {
         out.push_str(&format!("use crate::{prev}::{prev}_reserve;\n"));
@@ -297,8 +310,8 @@ mod tests {
     fn anchor_module_has_no_placeholders_and_a_regression_test_from_c2() {
         let s = scenarios::by_id("sorted_output").expect("scenario");
         let p = params();
-        let c1 = anchor_module(&s, Stage::C1, &p);
-        let c2 = anchor_module(&s, Stage::C2, &p);
+        let c1 = anchor_module(&s, Stage::C1, &p, 0);
+        let c2 = anchor_module(&s, Stage::C2, &p, 0);
         for text in [&c1, &c2] {
             assert!(!text.contains('@'), "{text}");
             assert!(text.contains("pub fn merge_windows(windows: &[Window])"));
@@ -319,11 +332,20 @@ mod tests {
                 crate_name: "demo".into(),
             };
             for stage in [Stage::C1, Stage::C2, Stage::C3Variant] {
-                let text = anchor_module(&s, stage, &p);
-                assert!(syn::parse_file(&text).is_ok(), "{}: {text}", s.id);
+                for noise in [0, 5] {
+                    let text = anchor_module(&s, stage, &p, noise);
+                    assert!(!text.contains('@'), "{}: {text}", s.id);
+                    assert!(syn::parse_file(&text).is_ok(), "{}: {text}", s.id);
+                }
             }
-            let legacy = legacy_module(&s, &p);
-            assert!(syn::parse_file(&legacy).is_ok(), "{}: {legacy}", s.id);
+            let consumer = consumer_module(&s, &p);
+            assert!(!consumer.contains('@'), "{}: {consumer}", s.id);
+            assert!(syn::parse_file(&consumer).is_ok(), "{}: {consumer}", s.id);
+            assert!(
+                consumer.contains(&format!("use crate::{}::", p.module)),
+                "{}: consumer must import the provider",
+                s.id
+            );
             for task in &s.tasks {
                 for v in [&task.correct, &task.wrong] {
                     let text = fixed_module(&s, s.fn_c2, v, &p);
@@ -347,11 +369,7 @@ mod tests {
             module: s.module.into(),
             crate_name: "demo".into(),
         };
-        for role in [
-            FillerRole::Plain,
-            FillerRole::Caller,
-            FillerRole::LegacyCaller,
-        ] {
+        for role in [FillerRole::Plain, FillerRole::Caller] {
             let f = FillerSpec {
                 name: "retry_queue".into(),
                 noun: "RetryQueue".into(),

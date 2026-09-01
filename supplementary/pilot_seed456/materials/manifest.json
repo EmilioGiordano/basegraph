@@ -1,0 +1,135 @@
+{
+  "version": 1,
+  "seed": 42,
+  "repos": [
+    {
+      "repo_id": "repo_01",
+      "path": "repo_01",
+      "crate_name": "quotaflow",
+      "scenario": "no_panic",
+      "invariant_type": "no_panic",
+      "invariant_text": "`parse_timeout` never panics, whatever the input string: it runs on raw config values while the service boots (`load_timeout`).",
+      "anchor_fqn_c2": "parse_timeout",
+      "anchor_fqn_c3": "parse_timeout",
+      "anchor_file_c2": "src/config.rs",
+      "anchor_file_c3": "src/config.rs",
+      "drift": false,
+      "drift_kind": null,
+      "file_count": 30,
+      "commits": {
+        "c1": "a79aa083c4c5e5199d0f44e1112e79f2b20d76c3",
+        "c2": "97f6fcf54be94d2370e628711975cd0bd8349764",
+        "c3": "da6e6e7e81ec7bcb710c82319c80f4f0b184bcac"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Minutes and hours",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/config.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Fractional seconds",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/config.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_02",
+      "path": "repo_02",
+      "crate_name": "relaycore",
+      "scenario": "return_positivity",
+      "invariant_type": "return_positivity",
+      "invariant_text": "`lead_time_days` always returns at least 1 day (a positive number); `promise_day` adds it to the calendar as an unsigned offset.",
+      "anchor_fqn_c2": "lead_time_days",
+      "anchor_fqn_c3": "lead_time_days",
+      "anchor_file_c2": "src/logistics.rs",
+      "anchor_file_c3": "src/logistics.rs",
+      "drift": true,
+      "drift_kind": "signature",
+      "file_count": 50,
+      "commits": {
+        "c1": "5873638da392b07be635d5c48ca26c30487fa3e7",
+        "c2": "f8203c73d6cb1fd1ee52070df63d3f951394f262",
+        "c3": "f2b114853614bf85f98e9169ef0c30a344b59c28"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Overnight priority",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/logistics.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Loyalty credit",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/logistics.rs"
+        }
+      ]
+    },
+    {
+      "repo_id": "repo_03",
+      "path": "repo_03",
+      "crate_name": "tallyforge",
+      "scenario": "no_side_effect",
+      "invariant_type": "no_side_effect",
+      "invariant_text": "`render_invoice` is pure: it never advances `NEXT_INVOICE`. Previews must not consume invoice numbers because the sequence is audited for gaps.",
+      "anchor_fqn_c2": "render_invoice",
+      "anchor_fqn_c3": "format_invoice",
+      "anchor_file_c2": "src/billing.rs",
+      "anchor_file_c3": "src/billing.rs",
+      "drift": true,
+      "drift_kind": "rename",
+      "file_count": 35,
+      "commits": {
+        "c1": "ab1adf7efc3f73841ecb1af847b5cff274d12ce5",
+        "c2": "affa1c98e823b294c3611c6d57a0c9e95768a684",
+        "c3": "9d562ea23988fd05f5157ba4f1738c7b7e0d7018"
+      },
+      "capture_task": "capture_task.md",
+      "tasks": [
+        {
+          "task_id": "task_1",
+          "title": "Preview with upcoming number",
+          "description": "task_1.md",
+          "primary_test": "primary_test_1.rs",
+          "oracle_test": "oracle_test_1.rs",
+          "fix_correct": "fix_correct_1.rs",
+          "fix_wrong": "fix_wrong_1.rs",
+          "fix_target": "src/billing.rs"
+        },
+        {
+          "task_id": "task_2",
+          "title": "Month-end statement",
+          "description": "task_2.md",
+          "primary_test": "primary_test_2.rs",
+          "oracle_test": "oracle_test_2.rs",
+          "fix_correct": "fix_correct_2.rs",
+          "fix_wrong": "fix_wrong_2.rs",
+          "fix_target": "src/billing.rs"
+        }
+      ]
+    }
+  ]
+}

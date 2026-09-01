@@ -17,7 +17,8 @@ use crate::builder::build_graph;
 use crate::cache::{Cache, JsonCache};
 use crate::graph::Graph;
 use crate::memory::anchor::{self, classify, Classification, ReanchorBasis};
-use crate::memory::model::{Kind, Memory, MemoryId, Provenance, Scope};
+use crate::memory::model::{AnchorKey, Kind, Memory, MemoryId, Provenance, Scope};
+use crate::memory::paths;
 use crate::memory::store::{Event, MemoryStore};
 use crate::memory::testgen::{self, Assertion};
 use crate::query;
@@ -219,7 +220,7 @@ impl ServerState {
                 },
                 {
                     "name": "recall",
-                    "description": "Retrieve stored memories (decisions, gotchas, invariants, past bugs) about a file or symbol. Each memory is annotated with its freshness against the current index: intact, evolved (interface changed), or orphaned (anchor gone, with any uncertain re-anchor candidates). Use before changing a symbol to learn what past work recorded about it.",
+                    "description": "Retrieve stored memories (decisions, gotchas, invariants, past bugs) about a file or symbol. Each memory is annotated with its freshness against the current index: intact, evolved (interface changed), or orphaned (anchor gone, with any uncertain re-anchor candidates). A memory is found by its own name, by the file its anchored symbol lives in (so querying the file you are about to edit works), and by the current name of a symbol that was renamed — an indirect hit says so in `reached_via` and is never presented as a direct one. Use before changing a symbol or a file to learn what past work recorded about it.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -357,8 +358,11 @@ impl ServerState {
                     .map_err(|e| ToolError::BadArg(format!("reading memory log: {e}")))?;
                 let views: Vec<Value> = memories
                     .iter()
-                    .filter(|m| scope_matches(&m.scope, target))
-                    .map(|m| memory_view(m, &self.graph))
+                    .filter_map(|m| {
+                        let classification = classify(&m.anchor, &self.graph);
+                        reach(m, target, &classification, &self.graph, &self.dir)
+                            .map(|reach| memory_view(m, &classification, reach))
+                    })
                     .collect();
                 let out = json!({ "target": target, "count": views.len(), "memories": views });
                 Ok(serde_json::to_string_pretty(&out).unwrap_or_else(|_| out.to_string()))
@@ -386,11 +390,24 @@ impl ServerState {
                     .iter()
                     .find(|n| n.fqn == fqn)
                     .ok_or_else(|| {
+                        let suggestions = anchor_suggestions(&self.graph, fqn);
+                        let hint = if suggestions.is_empty() {
+                            String::new()
+                        } else {
+                            format!(
+                                "; did you mean {}? (anchors use the indexed name: free functions bare, methods as Type::method)",
+                                suggestions
+                                    .iter()
+                                    .map(|s| format!("'{s}'"))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        };
                         ToolError::BadArg(format!(
-                            "no symbol '{fqn}' in the current index; the anchor must exist"
+                            "no symbol '{fqn}' in the current index; the anchor must exist{hint}"
                         ))
                     })?;
-                let anchor = anchor::anchor_of(node);
+                let anchor = anchor::anchor_of(node, &self.dir);
                 let count = self
                     .memory_store
                     .load_events()
@@ -424,7 +441,7 @@ impl ServerState {
                 let memory_id = required_str(args, "memory_id")?;
                 let chosen = required_str(args, "chosen_fqn")?;
                 let memory = self.find_memory(memory_id)?;
-                let anchor = anchor::confirm(&memory.anchor, chosen, &self.graph)
+                let anchor = anchor::confirm(&memory.anchor, chosen, &self.graph, &self.dir)
                     .map_err(|e| ToolError::BadArg(format!("cannot reanchor {memory_id}: {e}")))?;
                 self.memory_store
                     .append(&Event::Reanchored {
@@ -536,6 +553,25 @@ fn content_result(id: Value, text: &str, is_error: bool) -> Value {
     )
 }
 
+/// Indexed fqns a mistyped anchor probably meant: agents often qualify with
+/// the crate/module path, while the index uses bare names for free functions
+/// and `Type::method` for methods.
+fn anchor_suggestions(graph: &Graph, requested: &str) -> Vec<String> {
+    let mut out: Vec<String> = graph
+        .nodes()
+        .iter()
+        .map(|n| n.fqn.as_str())
+        .filter(|fqn| {
+            requested.ends_with(&format!("::{fqn}")) || fqn.ends_with(&format!("::{requested}"))
+        })
+        .map(str::to_string)
+        .collect();
+    out.sort();
+    out.dedup();
+    out.truncate(3);
+    out
+}
+
 fn required_str<'a>(args: &'a Value, key: &str) -> Result<&'a str, ToolError> {
     args.get(key)
         .and_then(Value::as_str)
@@ -578,8 +614,65 @@ fn parse_kind(s: &str) -> Option<Kind> {
 
 fn scope_matches(scope: &Scope, target: &str) -> bool {
     match scope {
-        Scope::File(p) => p == target,
+        Scope::File(p) => paths::matches(p, target),
         Scope::Symbol(s) => s == target,
+    }
+}
+
+/// How a `recall` query reached a memory. Anything but an exact scope match is
+/// reported back, so an indirect hit is never mistaken for a direct one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Reach {
+    Scope,
+    File,
+    Candidate,
+}
+
+/// A memory is reachable by its scope, by the file its anchored symbol lives in
+/// (today or when it was written), or by a re-anchor candidate — a symbol whose
+/// name the agent can actually know after a rename.
+fn reach(
+    memory: &Memory,
+    target: &str,
+    classification: &Classification,
+    graph: &Graph,
+    root: &Path,
+) -> Option<Reach> {
+    if scope_matches(&memory.scope, target) {
+        Some(Reach::Scope)
+    } else if matches_file(&memory.anchor, target, graph, root) {
+        Some(Reach::File)
+    } else if proposes(classification, target) {
+        Some(Reach::Candidate)
+    } else {
+        None
+    }
+}
+
+/// The file the anchored symbol occupies in the current index, or the one
+/// recorded with the anchor. Both sides are read as index-relative paths, so a
+/// live `Node::file` (an absolute machine path) is comparable to the path a
+/// caller types. An empty recorded file matches nothing.
+fn matches_file(anchor: &AnchorKey, target: &str, graph: &Graph, root: &Path) -> bool {
+    let live = graph
+        .nodes()
+        .iter()
+        .find(|n| n.fqn == anchor.fqn)
+        .map(|n| paths::relative(&n.file, root));
+    live.is_some_and(|f| paths::matches(&f, target))
+        || paths::matches(&paths::relative(&anchor.file, root), target)
+}
+
+/// Only hash-based candidates are searchable. Token similarity is a 0.5
+/// threshold: good enough to propose a re-anchor for review, far too loose to
+/// decide what a lookup returns.
+fn proposes(classification: &Classification, target: &str) -> bool {
+    match classification {
+        Classification::ReanchorCandidate { candidates, basis } => {
+            matches!(basis, ReanchorBasis::SigHash | ReanchorBasis::ShapeHash)
+                && candidates.iter().any(|c| c == target)
+        }
+        _ => false,
     }
 }
 
@@ -608,22 +701,34 @@ fn basis_label(basis: &ReanchorBasis) -> &'static str {
 
 /// Render one memory as JSON, always tagged with its freshness against the
 /// current index so a memory is never served without saying how stale it is.
-fn memory_view(memory: &Memory, graph: &Graph) -> Value {
-    let classification = classify(&memory.anchor, graph);
+fn memory_view(memory: &Memory, classification: &Classification, reach: Reach) -> Value {
     let mut view = json!({
         "id": memory.id.0,
         "kind": format!("{:?}", memory.kind),
         "scope": scope_label(&memory.scope),
         "content": memory.content,
-        "anchor": { "fqn": memory.anchor.fqn, "sig_hash": memory.anchor.sig_hash },
-        "status": status_label(&classification),
+        "anchor": {
+            "fqn": memory.anchor.fqn,
+            "sig_hash": memory.anchor.sig_hash,
+            "file": memory.anchor.file,
+        },
+        "status": status_label(classification),
         "uncertain": classification.is_uncertain(),
         "provenance": {
             "commit": memory.provenance.commit,
             "session": memory.provenance.session,
         },
     });
-    if let Classification::ReanchorCandidate { candidates, basis } = &classification {
+    match reach {
+        Reach::Scope => {}
+        Reach::File => {
+            view["reached_via"] = json!(format!("file of anchored symbol {}", memory.anchor.fqn));
+        }
+        Reach::Candidate => {
+            view["reached_via"] = json!(format!("reanchor candidate for {}", memory.anchor.fqn));
+        }
+    }
+    if let Classification::ReanchorCandidate { candidates, basis } = classification {
         view["reanchor_candidates"] = json!(candidates);
         view["reanchor_basis"] = json!(basis_label(basis));
     }
@@ -722,6 +827,219 @@ mod tests {
         }
     }
 
+    fn node_of(id: u32, name: &str, fqn: &str, signature: &str, file: &str) -> Node {
+        Node {
+            id: NodeId(id),
+            kind: NodeKind::Function,
+            name: name.into(),
+            fqn: fqn.into(),
+            signature: signature.into(),
+            sig_hash: crate::parser::sig::sig_hash(name, signature),
+            file: file.into(),
+            line_start: 1,
+            line_end: 1,
+            doc: None,
+        }
+    }
+
+    fn graph_of(nodes: Vec<Node>) -> Graph {
+        let mut g = Graph::new();
+        for n in nodes {
+            g.add_node(n);
+        }
+        g
+    }
+
+    /// A state over `graph`, with one memory anchored as captured from `before`
+    /// (the node as it stood when the memory was written).
+    fn state_with_anchor(dir: &TempDir, graph: Graph, before: &Node) -> ServerState {
+        let mut s = state_at(dir.0.clone());
+        s.graph = graph;
+        s.memory_store
+            .append(&Event::Created {
+                memory: anchored_memory(anchor::anchor_of(before, &dir.0)),
+            })
+            .expect("append");
+        s
+    }
+
+    fn recall_json(s: &mut ServerState, target: &str) -> Value {
+        let (is_error, text) = call(s, "recall", json!({ "target": target }));
+        assert!(!is_error, "recall({target}) failed: {text}");
+        serde_json::from_str(&text).expect("recall returns json")
+    }
+
+    /// A pure rename: same signature shape, new name, same file.
+    fn renamed_pair() -> (Node, Node) {
+        (
+            node_of(0, "f", "f", "fn f (x : i32) -> i32", "src/a.rs"),
+            node_of(0, "g", "g", "fn g (x : i32) -> i32", "src/a.rs"),
+        )
+    }
+
+    #[test]
+    fn test_recall_finds_a_renamed_symbol_by_its_new_name() {
+        let dir = TempDir::new();
+        let (before, after) = renamed_pair();
+        let mut s = state_with_anchor(&dir, graph_of(vec![after]), &before);
+
+        let out = recall_json(&mut s, "g");
+        assert_eq!(out["count"], 1, "{out}");
+        let m = &out["memories"][0];
+        assert_eq!(m["status"], "orphaned");
+        assert_eq!(m["uncertain"], true);
+        assert_eq!(m["reached_via"], "reanchor candidate for f");
+        assert_eq!(m["anchor"]["fqn"], "f");
+    }
+
+    #[test]
+    fn test_recall_finds_a_dead_anchor_by_its_recorded_file() {
+        let dir = TempDir::new();
+        let (before, after) = renamed_pair();
+        let mut s = state_with_anchor(&dir, graph_of(vec![after]), &before);
+
+        let out = recall_json(&mut s, "src/a.rs");
+        assert_eq!(out["count"], 1, "{out}");
+        assert_eq!(out["memories"][0]["status"], "orphaned");
+        assert_eq!(
+            out["memories"][0]["reached_via"],
+            "file of anchored symbol f"
+        );
+    }
+
+    #[test]
+    fn test_recall_finds_an_intact_memory_by_its_file() {
+        let dir = TempDir::new();
+        let node = node_of(0, "keep", "keep", "fn keep (x : i32) -> i32", "src/keep.rs");
+        let mut s = state_with_anchor(&dir, graph_of(vec![node.clone()]), &node);
+
+        let out = recall_json(&mut s, "src/keep.rs");
+        assert_eq!(out["count"], 1, "{out}");
+        assert_eq!(out["memories"][0]["status"], "intact");
+        assert_eq!(
+            out["memories"][0]["reached_via"],
+            "file of anchored symbol keep"
+        );
+        // The direct hit stays direct: no indirection is reported for it.
+        let direct = recall_json(&mut s, "keep");
+        assert_eq!(direct["count"], 1);
+        assert!(direct["memories"][0]["reached_via"].is_null(), "{direct}");
+    }
+
+    #[test]
+    fn test_recall_never_retrieves_by_token_similarity() {
+        let dir = TempDir::new();
+        // Renamed AND reshaped: only the fqn tokens overlap, so the classifier
+        // proposes it by similarity — a proposal must not become a lookup.
+        let before = node_of(
+            0,
+            "compute_total",
+            "Foo::compute_total",
+            "fn compute_total (& self) -> i32",
+            "src/foo.rs",
+        );
+        let after = node_of(
+            0,
+            "compute_total_sum",
+            "Foo::compute_total_sum",
+            "fn compute_total_sum (& self , extra : i32) -> i64",
+            "src/foo.rs",
+        );
+        let mut s = state_with_anchor(&dir, graph_of(vec![after]), &before);
+
+        let similar = recall_json(&mut s, "Foo::compute_total_sum");
+        assert_eq!(similar["count"], 0, "{similar}");
+
+        // It is still reachable by its file, and still *proposes* the
+        // similar name once retrieved.
+        let by_file = recall_json(&mut s, "src/foo.rs");
+        assert_eq!(by_file["count"], 1, "{by_file}");
+        assert_eq!(
+            by_file["memories"][0]["reanchor_candidates"][0],
+            "Foo::compute_total_sum"
+        );
+    }
+
+    #[test]
+    fn test_recall_loads_legacy_memories_and_an_empty_file_never_matches() {
+        let dir = TempDir::new();
+        let mut s = state_at(dir.0.clone());
+        s.graph = graph_of(vec![node_of(
+            0,
+            "foo",
+            "foo",
+            "fn foo (x : i32) -> i32",
+            "src/live.rs",
+        )]);
+        // Two memories as written before `file` existed on the anchor: one
+        // whose symbol is still indexed, one whose symbol is gone.
+        let legacy = |id: &str, fqn: &str, sig_hash: &str| {
+            format!(
+                "{{\"version\":1,\"event\":{{\"Created\":{{\"memory\":{{\"id\":\"{id}\",\
+                 \"content\":\"legacy note\",\"anchor\":{{\"fqn\":\"{fqn}\",\
+                 \"sig_hash\":\"{sig_hash}\",\"shape_hash\":\"\"}},\
+                 \"scope\":{{\"Symbol\":\"{fqn}\"}},\"kind\":\"Invariant\",\
+                 \"provenance\":{{\"commit\":null,\"session\":null}}}}}}}}}}\n"
+            )
+        };
+        let live_hash = crate::parser::sig::sig_hash("foo", "fn foo (x : i32) -> i32");
+        std::fs::write(
+            dir.0.join("codegraph-memory.jsonl"),
+            format!(
+                "{}{}",
+                legacy("m-live", "foo", &live_hash),
+                legacy("m-gone", "vanished", "0000000000000000")
+            ),
+        )
+        .expect("write legacy log");
+
+        // Both load: the missing field defaults, nothing errors.
+        assert_eq!(recall_json(&mut s, "foo")["count"], 1);
+        assert_eq!(recall_json(&mut s, "vanished")["count"], 1);
+
+        // The live one is reachable by the file its symbol occupies today,
+        // resolved from the graph rather than from the (absent) stored field.
+        let by_file = recall_json(&mut s, "src/live.rs");
+        assert_eq!(by_file["count"], 1, "{by_file}");
+        assert_eq!(by_file["memories"][0]["id"], "m-live");
+
+        // The orphaned one has no recorded file, and an empty file matches
+        // nothing — not even an empty query.
+        assert_eq!(recall_json(&mut s, "")["count"], 0);
+    }
+
+    #[test]
+    fn test_recall_regression_orphaned_rename_is_reachable() {
+        // Pilot 2, repo_03: `render_invoice` was renamed to `format_invoice`,
+        // and every name the agent could think of returned nothing.
+        let dir = TempDir::new();
+        let before = node_of(
+            0,
+            "render_invoice",
+            "render_invoice",
+            "fn render_invoice (invoice : & Invoice) -> String",
+            "src/billing.rs",
+        );
+        let after = node_of(
+            0,
+            "format_invoice",
+            "format_invoice",
+            "fn format_invoice (invoice : & Invoice) -> String",
+            "src/billing.rs",
+        );
+        let mut s = state_with_anchor(&dir, graph_of(vec![after]), &before);
+
+        for target in ["format_invoice", "src/billing.rs"] {
+            let out = recall_json(&mut s, target);
+            assert_eq!(out["count"], 1, "recall({target}): {out}");
+            assert_eq!(out["memories"][0]["status"], "orphaned");
+            assert!(
+                !out["memories"][0]["reached_via"].is_null(),
+                "an indirect hit must say so: {out}"
+            );
+        }
+    }
+
     /// A state over a real one-file crate on disk, indexed for real.
     fn crate_state(dir: &TempDir, lib: &str) -> ServerState {
         std::fs::create_dir_all(dir.0.join("src")).expect("src dir");
@@ -810,6 +1128,7 @@ mod tests {
                         fqn: "foo".into(),
                         sig_hash: "aaaabbbbccccdddd".into(),
                         shape_hash: String::new(),
+                        file: String::new(),
                     })
                 },
             })
@@ -833,6 +1152,7 @@ mod tests {
                     fqn: "compute".into(),
                     sig_hash: "0000000000000000".into(),
                     shape_hash: String::new(),
+                    file: String::new(),
                 }),
             })
             .expect("append");
@@ -945,6 +1265,7 @@ mod tests {
                 fqn: "foo".into(),
                 sig_hash: "aaaabbbbccccdddd".into(),
                 shape_hash: String::new(),
+                file: String::new(),
             },
         );
         let (is_error, text) = call(&mut s, "supersede", json!({ "memory_id": "m1" }));
@@ -1036,6 +1357,7 @@ mod tests {
                 fqn: "foo".into(),
                 sig_hash: "aaaabbbbccccdddd".into(),
                 shape_hash: String::new(),
+                file: String::new(),
             },
         );
         let (is_error, text) = call(
@@ -1058,6 +1380,7 @@ mod tests {
                 fqn: "bar".into(),
                 sig_hash: "aaaabbbbccccdddd".into(),
                 shape_hash: String::new(),
+                file: String::new(),
             },
         );
         let (is_error, text) = call(
@@ -1082,6 +1405,7 @@ mod tests {
                 fqn: "bar".into(),
                 sig_hash: "aaaabbbbccccdddd".into(),
                 shape_hash: String::new(),
+                file: String::new(),
             },
         );
         let (_, recalled) = call(&mut s, "recall", json!({ "target": "bar" }));
@@ -1200,6 +1524,7 @@ mod tests {
                         fqn: "foo".into(),
                         sig_hash: "aaaabbbbccccdddd".into(),
                         shape_hash: String::new(),
+                        file: String::new(),
                     },
                     scope: Scope::Symbol("foo".into()),
                     kind: Kind::Invariant,
@@ -1273,6 +1598,34 @@ mod tests {
             }))
             .expect("response");
         assert_eq!(resp["result"]["isError"], true);
+    }
+
+    #[test]
+    fn test_remember_qualified_anchor_suggests_the_indexed_name() {
+        let mut s = sample_state();
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 24, "method": "tools/call",
+                "params": { "name": "remember", "arguments": {
+                    "anchor": "demo::app::foo", "kind": "gotcha", "content": "x"
+                } }
+            }))
+            .expect("response");
+        assert_eq!(resp["result"]["isError"], true);
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(text.contains("did you mean 'foo'"), "{text}");
+
+        // A name nothing matches gets the plain error, no suggestions.
+        let resp = s
+            .handle(&json!({
+                "jsonrpc": "2.0", "id": 25, "method": "tools/call",
+                "params": { "name": "remember", "arguments": {
+                    "anchor": "zzz::nope", "kind": "gotcha", "content": "x"
+                } }
+            }))
+            .expect("response");
+        let text = resp["result"]["content"][0]["text"].as_str().expect("text");
+        assert!(!text.contains("did you mean"), "{text}");
     }
 
     #[test]

@@ -468,7 +468,7 @@ mod tests {
         }
     }
 
-    fn memory_for(graph: &Graph, fqn: &str, kind: Kind, content: &str) -> Memory {
+    fn memory_for(root: &Path, graph: &Graph, fqn: &str, kind: Kind, content: &str) -> Memory {
         let node = graph
             .nodes()
             .iter()
@@ -477,7 +477,7 @@ mod tests {
         Memory {
             id: MemoryId("mem-1".into()),
             content: content.into(),
-            anchor: anchor_of(node),
+            anchor: anchor_of(node, root),
             scope: Scope::Symbol(fqn.into()),
             kind,
             provenance: Provenance::default(),
@@ -564,7 +564,13 @@ mod tests {
     fn generates_a_positive_test_for_a_pub_free_fn() {
         let repo = TempCrate::new("pub fn compute(x: i32) -> i32 { x + 1 }\n");
         let graph = repo.graph();
-        let memory = memory_for(&graph, "compute", Kind::Invariant, "always positive");
+        let memory = memory_for(
+            &repo.0,
+            &graph,
+            "compute",
+            Kind::Invariant,
+            "always positive",
+        );
         let generated = generate(&memory, &graph).expect("generate");
         assert_eq!(generated.assertion, Assertion::Positive);
         assert_eq!(generated.test_name, "invariant_mem_1");
@@ -593,7 +599,7 @@ mod tests {
         let repo = TempCrate::new("pub fn items() -> Vec<u8> { vec![] }\n");
         let graph = repo.graph();
         for content in ["sorted", "not null", "non-empty", "positive", "who knows"] {
-            let memory = memory_for(&graph, "items", Kind::Invariant, content);
+            let memory = memory_for(&repo.0, &graph, "items", Kind::Invariant, content);
             let generated = generate(&memory, &graph).expect("generate");
             assert!(
                 syn::parse_file(&generated.source).is_ok(),
@@ -608,7 +614,7 @@ mod tests {
         let repo = TempCrate::new("pub fn items() -> Vec<u8> { vec![] }\n");
         let graph = repo.graph();
         let content = "sorted \"by key\" {always}\nsecond line \\ end";
-        let memory = memory_for(&graph, "items", Kind::Invariant, content);
+        let memory = memory_for(&repo.0, &graph, "items", Kind::Invariant, content);
         let generated = generate(&memory, &graph).expect("generate");
         assert!(generated
             .source
@@ -635,7 +641,13 @@ mod tests {
     fn unencoded_wording_yields_a_panicking_scaffold() {
         let repo = TempCrate::new("pub fn touch() {}\n");
         let graph = repo.graph();
-        let memory = memory_for(&graph, "touch", Kind::Invariant, "must be idempotent");
+        let memory = memory_for(
+            &repo.0,
+            &graph,
+            "touch",
+            Kind::Invariant,
+            "must be idempotent",
+        );
         let generated = generate(&memory, &graph).expect("generate");
         assert_eq!(generated.assertion, Assertion::Unencoded);
         assert!(generated.source.contains("let _result = touch();"));
@@ -646,7 +658,7 @@ mod tests {
     fn zero_arg_call_has_no_inputs() {
         let repo = TempCrate::new("pub fn seed() -> u32 { 1 }\n");
         let graph = repo.graph();
-        let memory = memory_for(&graph, "seed", Kind::Invariant, "positive");
+        let memory = memory_for(&repo.0, &graph, "seed", Kind::Invariant, "positive");
         let generated = generate(&memory, &graph).expect("generate");
         assert!(generated.source.contains("let result = seed();"));
     }
@@ -661,7 +673,7 @@ mod tests {
         )
         .expect("write module");
         let graph = repo.graph();
-        let memory = memory_for(&graph, "twice", Kind::Invariant, "positive");
+        let memory = memory_for(&repo.0, &graph, "twice", Kind::Invariant, "positive");
         let generated = generate(&memory, &graph).expect("generate");
         assert_eq!(generated.import_path, "demo_crate::util::math::twice");
     }
@@ -670,7 +682,7 @@ mod tests {
     fn rejects_non_invariants() {
         let repo = TempCrate::new("pub fn compute(x: i32) -> i32 { x }\n");
         let graph = repo.graph();
-        let memory = memory_for(&graph, "compute", Kind::Gotcha, "positive");
+        let memory = memory_for(&repo.0, &graph, "compute", Kind::Gotcha, "positive");
         let err = generate(&memory, &graph).expect_err("not an invariant");
         assert!(
             matches!(
@@ -688,7 +700,7 @@ mod tests {
     fn rejects_anchors_that_are_not_intact() {
         let repo = TempCrate::new("pub fn compute(x: i32) -> i32 { x }\n");
         let graph = repo.graph();
-        let mut memory = memory_for(&graph, "compute", Kind::Invariant, "positive");
+        let mut memory = memory_for(&repo.0, &graph, "compute", Kind::Invariant, "positive");
         memory.anchor.sig_hash = "0000000000000000".into();
         let err = generate(&memory, &graph).expect_err("evolved");
         assert!(
@@ -706,6 +718,7 @@ mod tests {
             fqn: "vanished".into(),
             sig_hash: "0000000000000000".into(),
             shape_hash: String::new(),
+            file: String::new(),
         };
         let err = generate(&memory, &graph).expect_err("orphaned");
         assert!(
@@ -742,7 +755,7 @@ mod tests {
             ("nothing", "returns nothing"),
             ("S::make", "free functions"),
         ] {
-            let memory = memory_for(&graph, fqn, Kind::Invariant, "positive");
+            let memory = memory_for(&repo.0, &graph, fqn, Kind::Invariant, "positive");
             let err = generate(&memory, &graph).expect_err(fqn);
             assert!(
                 matches!(err, TestGenError::Unsupported { .. }),
@@ -756,7 +769,7 @@ mod tests {
     fn unit_return_is_fine_for_an_unencoded_scaffold() {
         let repo = TempCrate::new("pub fn nothing(x: i32) {}\n");
         let graph = repo.graph();
-        let memory = memory_for(&graph, "nothing", Kind::Invariant, "idempotent");
+        let memory = memory_for(&repo.0, &graph, "nothing", Kind::Invariant, "idempotent");
         assert!(generate(&memory, &graph).is_ok());
     }
 
@@ -764,7 +777,7 @@ mod tests {
     fn rejects_a_stale_index() {
         let repo = TempCrate::new("pub fn compute(x: i32) -> i32 { x }\n");
         let graph = repo.graph();
-        let memory = memory_for(&graph, "compute", Kind::Invariant, "positive");
+        let memory = memory_for(&repo.0, &graph, "compute", Kind::Invariant, "positive");
         // The file changed after indexing; the stored hash no longer matches.
         std::fs::write(
             repo.0.join("src").join("lib.rs"),
@@ -783,7 +796,7 @@ mod tests {
         std::fs::create_dir_all(&dir).expect("mkdir");
         std::fs::write(dir.join("a.rs"), "pub fn compute(x: i32) -> i32 { x }\n").expect("write");
         let graph = build_graph(&dir).expect("build graph");
-        let memory = memory_for(&graph, "compute", Kind::Invariant, "positive");
+        let memory = memory_for(&dir, &graph, "compute", Kind::Invariant, "positive");
         let err = generate(&memory, &graph).expect_err("no manifest");
         let _ = std::fs::remove_dir_all(&dir);
         assert!(matches!(err, TestGenError::NoManifest { .. }), "{err}");
@@ -798,7 +811,7 @@ mod tests {
         )
         .expect("write main");
         let graph = repo.graph();
-        let memory = memory_for(&graph, "compute", Kind::Invariant, "positive");
+        let memory = memory_for(&repo.0, &graph, "compute", Kind::Invariant, "positive");
         let err = generate(&memory, &graph).expect_err("binary");
         assert!(matches!(err, TestGenError::NotImportable { .. }), "{err}");
     }

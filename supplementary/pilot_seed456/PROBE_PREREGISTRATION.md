@@ -1,0 +1,456 @@
+# A0 calibration probe — pre-registration (pilot 2)
+
+Written 2026-08-31, **before any run of pilot 2**. Materials:
+`supplementary/pilot_seed456/` (3 repos × 2 tasks, generated post-redesign,
+`--verify` 45/45). This document fixes the probe, its stop rule and its
+declared deviations in advance; nothing here changes `go-no-go.md`, which
+stays sealed.
+
+## 1. Why a probe instead of the full 18 runs
+
+§7 GO requires **both** (a) A2 violating strictly fewer invariants than A0
+over all tasks, and (b) A2 beating A1 in the drift condition. If A0 violates
+**0/6**, condition (a) cannot hold: GO becomes arithmetically impossible and
+the remaining 12 runs cannot produce signal in any direction. Pilot 1 paid
+full price ($12.78, 24 sessions) to learn exactly this.
+
+The probe buys that same information for the A0 third of the cost, and only
+that information. It decides nothing about the hypothesis.
+
+## 2. What the probe is
+
+- Arm **A0 only**, all 6 tasks (3 repos × 2), 1 seed.
+- **No seeding sessions.** A0 has no memory material, so the six A1/A2
+  capture sessions are not run and not paid for at this stage.
+- Caps, model and exposure **identical** to pilot 1 and to the eventual
+  A1/A2 runs, so nothing but the materials changes between pilots:
+  `claude-fable-5`, 40 turns, 900 s, 400 000 heuristic tokens, $8/run,
+  capture at C2, primary test exposed, oracle hidden.
+
+**Declared confound.** Pilot 1 ran on Claude Code CLI **2.1.247**; the CLI
+on this machine is **2.1.251**. The whole attribution of pilot 2 is "same
+model, better materials", so the harness version is recorded here rather
+than discovered later. A patch bump is unlikely to move the primary metric,
+but it is not nothing and it is not hidden. Record the exact
+`claude --version` in the pilot 2 report.
+
+## 3. Declared deviation from the sealed protocol
+
+§5.5 randomises repo/task/arm order across runs. Running A0 first breaks
+**arm**-order randomisation. This is declared, not hidden, and is admissible
+because:
+
+- it is §0 material calibration ("confirma que los repos e invariantes se
+  comportan como se diseñaron"), not the campaign;
+- no threshold in §7 is touched;
+- repo/task order inside the probe stays randomised (`--order-seed 1`);
+- **arm order has no carrier between runs.** §5 mandates a fresh agent
+  instance per run, so there is no within-agent carryover for arm-order
+  randomisation to guard against. The deviation is nominal, not substantive;
+- if the probe passes, the six A0 runs are **reused verbatim** as the A0
+  third of pilot 2. The cost is re-ordered, not added.
+
+The reuse claim was verified, not assumed. Against a scripted 6-row A0
+`runs.jsonl`, re-invoking the runner with `--arms a0,a1,a2` on the same
+`--out` reports `18 runs (6 done, 12 pending)`, executes only the 12 A1/A2
+runs, and leaves the six A0 rows byte-identical. Resume is keyed on
+`run_id`.
+
+The deviation is reported in the pilot 2 report.
+
+## 4. Stop rule (pre-committed)
+
+| A0 result | Decision |
+|---|---|
+| **0/6 violations** | **STOP.** Do not run the capture sessions or A1/A2. The materials do not discriminate; per §0 the design gets fixed and the pilot is run again. |
+| **≥1/6 violations** | **PROCEED** to seeding + A1/A2 on these same materials, keeping the six A0 runs. |
+
+**Reading a 0/6 result requires `fix_pass`.** A 0/6 violation result is only
+diagnosed as "traps too weak" if `fix_pass` is true on **≥5/6** runs. Below
+that, the agent never produced a working fix and "did not violate" is
+vacuous: the diagnosis is task difficulty or caps, not trap locality, and
+the §6 candidate fixes do not apply. (Pilot 1's A0 scored 6/6 `fix_pass`, so
+this is a guard, not an expectation. The runner records the column in
+`runs_table.md`.)
+
+Reported alongside, **not a gate**: whether any A0 violation falls in the
+drift condition (repo_02, repo_03 — 4 of the 6 tasks). If A0 fails only on
+repo_01, the decisive RQ2 axis still has no headroom; proceed, but say so
+in the report.
+
+## 5. Pre-registered prediction
+
+Recorded before running so that a confirmed prediction counts as evidence
+rather than as post-hoc explanation. From an advisor review of the generated
+materials on 2026-08-31:
+
+- **repo_01** (`no_panic`, no drift) — *most* likely to violate. The wrong
+  fix, `value.split_at(value.len() - 1)`, is the natural implementation of
+  suffix parsing and panics on `""` (usize underflow) and on any non-ASCII
+  input (`"é"`, `"５m"`). Nothing in `src/config.rs` states the
+  total-function requirement.
+- **repo_02** (`return_positivity`, signature drift) — intermediate. The
+  wrong fix early-returns *above* the `days.max(1)` clamp, and the file
+  plants `Style: prefer early returns in new helpers here`. But the clamp is
+  visible inside the function under edit.
+- **repo_03** (`no_side_effect`, rename drift) — *least* likely to violate.
+  `issue_number()`'s `fetch_add` sits 40 lines above the edit site, and the
+  C2 regression test `previewing_a_draft_is_stable` asserts the purity rule
+  **inside the file the agent must edit**. This is the same scenario that
+  produced 0/6 as repo_01 in pilot 1.
+
+If repo_03 violates, this prediction was wrong and the material is stronger
+than the review judged. That gets recorded too.
+
+## 6. Known material weaknesses, recorded before the probe
+
+These are the candidate fixes if the stop rule fires, listed now so the
+post-probe redesign is not invented after seeing the numbers:
+
+1. **C2 leaves its regression test in the provider file.** In repo_02
+   (`short_express_routes_promise_next_day`) and repo_03
+   (`previewing_a_draft_is_stable`) the test that encodes the invariant
+   lives in the `mod tests` of the file being edited. The generator
+   redesign moved the *consumer* to another module but left the *invariant*
+   locally visible. Fix: emit C2's regression test under `tests/`.
+2. **C2 commit messages are self-diagnostic.** `fix: invoice previews show a
+   different number every time` and `fix: express deliveries on short routes
+   are promised for today` name the bug outright; `git log --oneline` is 13
+   lines and the 8 noise commits are transparently noise
+   (`chore: tidy X helpers`). §3 asks for realistic-but-not-explicit.
+3. **repo_03 reuses a scenario that already measured nothing.**
+
+## 7. Harness rehearsal (done, $0)
+
+Before spending anything, the A0-only path was exercised end to end with the
+scripted agent against these exact materials:
+
+| Rehearsal | Result |
+|---|---|
+| `--agent scripted:a0=correct` | violation **no** 6/6, `fix_pass=true` 6/6 |
+| `--agent scripted:a0=wrong` | violation **yes** 6/6, `fix_pass=true` 6/6 |
+
+So the oracle wiring discriminates through the *runner*, not just through
+the generator's `--verify`, on all six tasks. The runner classifies 4 of the
+6 tasks as the drift condition, as designed.
+
+Drift visibility was likewise confirmed end to end (`remember` at C2 →
+`recall` at C3): repo_01 `intact`, repo_02 `evolved`, repo_03 `orphaned`
+with re-anchor candidate `format_invoice`. The pilot-1 material defect
+(`duplicate` drift classifying as `intact`) is closed.
+
+## 8. Operational preconditions
+
+- **Rebuild every release binary first.** `experiment_runner` resolves
+  `codegraph` as its own sibling and only checks that the file exists.
+  `cargo build --release --bin experiment_runner` does *not* rebuild
+  `codegraph.exe`; a stale one silently answers `unknown tool: remember` /
+  `unknown tool: recall`, which would void arm A2 without any error. Run
+  `cargo build --release` (all bins). Not relevant to this A0 probe, but it
+  is a precondition for the A1/A2 stage that follows.
+- **Work dir outside any `CLAUDE.md` tree.** The default is `<out>/work`,
+  which lands inside the codegraph repo and would load its `CLAUDE.md` into
+  every run. Pass `--work-dir` explicitly.
+- **`CLAUDE_CONFIG_DIR` isolation is the operator's job, not the runner's**
+  (`tools/README.md`). The runner sets only the telemetry env vars. Without
+  it the operator's hooks, plugins, user settings and user MCP servers load
+  into every run, which is not what pilot 1 measured. Point it at a scratch
+  directory holding **only** a copy of `~/.claude/.credentials.json`.
+  (`--bare` would do the same but refuses a claude.ai login.)
+- The operator's global `~/.claude/CLAUDE.md` is loaded from the real home
+  directory regardless, reaching every arm alike, as in pilot 1. Declare it
+  with the results.
+
+## 9. Commands
+
+```bash
+cd C:/Users/giord/Desktop/dashboard/codegraph
+cargo build --release
+
+# Isolation (§8): a config dir holding ONLY the credentials — no hooks, no
+# plugins, no user settings, no user MCP servers.
+mkdir -p C:/Users/giord/Desktop/dashboard/pilot2_cfg
+cp ~/.claude/.credentials.json C:/Users/giord/Desktop/dashboard/pilot2_cfg/
+
+CLAUDE_CONFIG_DIR=C:/Users/giord/Desktop/dashboard/pilot2_cfg \
+./target/release/experiment_runner.exe \
+  --manifest supplementary/pilot_seed456/manifest.json \
+  --arms a0 --seeds 1 \
+  --agent claude --model claude-fable-5 \
+  --max-turns 40 --time-cap-secs 900 --token-cap 400000 --budget-usd 8 \
+  --out supplementary/pilot_seed456/results \
+  --work-dir C:/Users/giord/Desktop/dashboard/pilot2_work \
+  --keep-work
+
+./target/release/scorer.exe \
+  --runs supplementary/pilot_seed456/results/runs.jsonl \
+  --out supplementary/pilot_seed456/results --table
+```
+
+**Reading the result.** The scorer's §7 verdict line is *not* the probe's
+output — with a single arm present it necessarily prints
+`GREY / not decidable: some arm or condition has no runs`. The probe's
+output is the A0 violation rate, from `runs_table.md` or the
+`a0: n/6 = … drift n/4` line of `summary.json`.
+
+## 10. Note on the seed
+
+The directory is named `pilot_seed456`, but the manifest records **seed 42**
+(the generator's default; no `--seed` was passed). Pilot 1 deliberately used
+seed 123, disjoint from the planned seed-42 campaign. That disjointness was
+lost here: repo_01–03 of this pilot draw the same scenarios and crates as
+the first three repos of a seed-42 campaign. This does not affect the probe
+or pilot 2 — it blocks the *campaign*, which must therefore be generated on
+a seed other than 42 so that pilot materials do not reappear inside it.
+
+---
+
+## 11. Amendment — 2026-08-31, before any run of pilot 2
+
+Written after a second review of the shipped materials and of
+`tools/experiment_runner/capture.rs`, and **before the probe was launched**
+(`supplementary/pilot_seed456/results/` was empty; verified). Everything
+below amends this pre-registration only. `go-no-go.md` stays sealed; no
+threshold in §7 of that document is touched.
+
+### 11.1 The stop rule is split by condition
+
+§4 gated on the total (6 tasks) and demoted the drift subset to "reported
+alongside, not a gate". That is inconsistent with §1: the probe exists
+because runs that cannot produce signal should not be paid for, and a
+violation confined to repo_01 leaves §7 condition (b) — A2 strictly beats
+A1 **in the drift condition** — with no headroom, for the same arithmetic
+reason a 0/6 kills condition (a). §5's own ordering makes "repo_01 only"
+the modal `≥1/6` outcome, so this is the likely branch, not a corner case.
+
+The stop rule is therefore keyed on the drift subset (repo_02, repo_03 —
+4 of the 6 tasks):
+
+| A0 result | Decision |
+|---|---|
+| **drift ≥1** | **PROCEED** to seeding + A1/A2 on these materials. Both axes live. |
+| **drift 0, total ≥1** | Condition (b) is untestable on these materials. **Do not launch the full 12.** Spike **2 A1 runs on repo_03** (~$2) to test the discard mechanism of §11.2 first; proceed only if A1 violates at least once there. Otherwise stop and strengthen the drift materials. |
+| **total 0**, `fix_pass` ≥5/6 | **STOP.** Materials do not discriminate; fix the design per §0 and re-pilot. (Unchanged.) |
+| **total 0**, `fix_pass` <5/6 | **STOP**, but the diagnosis is difficulty or caps, not trap locality; the §6 candidate fixes do not apply. (Unchanged.) |
+
+### 11.2 New material weakness (fourth §6 entry): the payload is anchor-independent
+
+`capture.rs` gives both memory arms the same semantic payload and differs
+only in addressing. `CAPTURE_C2_A1` asks for "one line per gotcha,
+reference the symbol (fqn)", example `auth::validate_token — NEVER log raw
+token, use hash_token(t) for logs`; `CAPTURE_C2_A2` asks for "the invariant
+in natural language" anchored to the symbol.
+
+In repo_03 A1's line will therefore read close to `render_invoice — never
+advances NEXT_INVOICE; previews must not consume numbers`. At C3
+`render_invoice` is gone, but the line still names `NEXT_INVOICE` and
+states the requirement outright. What A2 adds over A1 is *which symbol the
+rule now applies to* — recoverable from the content itself.
+
+So §7 condition (b) has thin headroom **independently of what A0 does**.
+Exactly one mechanism keeps it alive: A1 **discarding** the note as dead
+documentation because its anchor does not resolve. If A1 applies the rule
+anyway, (b) is dead on these materials. Hanging a GO on that single
+behavioural coin-flip at n=4 is not sound, which is why §11.1 routes the
+ambiguous branch through a 2-run A1 spike on repo_03.
+
+Recorded as a §0 material-design finding, admissible under go-no-go §0
+("si el piloto expone problemas de diseño, se corrige el diseño — no el
+protocolo"). The constructive reading: freshness classification, the
+system's actual contribution, currently surfaces in the false-confidence
+rubric, which §7 makes a side-condition rather than a gate. Strengthening
+the drift materials means making the memory *misdirecting* when stale (a
+successor whose rule differs, or two plausible successors), not merely
+mis-addressed.
+
+### 11.3 Corrections to the §5 prediction
+
+Both corrections are recorded before any number exists.
+
+- **repo_01 is downgraded from "most likely to violate" to "depends on
+  rewrite-vs-extend".** §5 was formed from `fix_wrong_1.rs` /
+  `fix_correct_1.rs` without the *starting* state. The shipped
+  `src/config.rs` already has `parse_timeout` total by construction —
+  `strip_suffix` into a nested match, then `parse().unwrap_or(
+  DEFAULT_TIMEOUT_MS)`. Adding `m` and `h` by extending that match is the
+  minimal-diff path and preserves totality. `value.split_at(value.len() -
+  1)` requires electing to rewrite the function rather than extend it, so
+  it is one of two rewrite paths, not the natural one.
+- **The `Style: prefer early returns in new helpers here` comment is not a
+  repo_02 lure.** It is verbatim boilerplate in all three provider files
+  (`repo_01/src/config.rs`, `repo_02/src/logistics.rs`,
+  `repo_03/src/billing.rs`), alongside three other generic comments. It is
+  a uniform decoy, not evidence of targeted difficulty in repo_02.
+
+The §5 ordering (repo_01 > repo_02 > repo_03) is left standing as the
+recorded prediction, with repo_01's confidence reduced.
+
+### 11.4 Reuse of the A0 runs depends on the `--seeds` flag
+
+§3's reuse claim holds because `plan.rs` iterates `for seed in 0..seeds`,
+so `--seeds 1` yields one seed index and `run_id`s of the form
+`repo_01-task_1-a0-s0`. **The A1/A2 stage must pass `--seeds 1` as well.**
+A different value changes the `run_id`s, and the six A0 runs would be
+re-executed and re-paid instead of reused.
+
+---
+
+## 12. Probe outcome and the pre-registered A1/A2 stage
+
+Ran 2026-08-31 15:41:47 -0300 on Claude Code CLI **2.1.251** (the confound
+declared in §2), `claude-fable-5`, isolation per §8. Six runs, $2.31, no
+infrastructure failure: no timeout, no cap exhaustion, no harness crash.
+Raw artifacts committed under `results/`.
+
+### 12.1 Result
+
+```
+a0: 1/6 = 0.17 [0.03, 0.56]  drift 1/4  false-confidence 0  cap 0
+fix_pass: 6/6
+```
+
+The single violation is **repo_02-task_2** (`return_positivity`, signature
+drift) — oracle failed while the primary passed, which is the trap behaving
+as designed. repo_01 0/2, repo_02-task_1 clean, repo_03 0/2.
+
+### 12.2 Decision: PROCEED (§11.1, drift ≥1)
+
+The amended stop rule fires on the drift subset: `drift 1/4 ≥ 1` →
+**PROCEED** to seeding + A1/A2 on these same materials, reusing the six A0
+runs (`--seeds 1`). `fix_pass` is 6/6, so the §4 vacuity guard does not
+apply. The rule is applied as signed; no threshold is reinterpreted after
+seeing the number.
+
+### 12.3 What the margin actually is, stated before the A1/A2 runs
+
+Recorded now so it is not presented as insight later. A0 = 1/6 overall,
+1/4 in drift. Against §7:
+
+- **Condition (a)** — A2 strictly below A0 over all tasks — requires A2 at
+  **0/6**. One run of headroom.
+- **Condition (b)** — A2 strictly below A1 in drift — requires A1 to violate
+  at least once in drift **and** A2 not to. The only drift task anything
+  violated is repo_02-task_2. So a GO now rests on a single task.
+
+This is §11.2 quantified: the headroom is one run wide, and it is one run
+wide because the materials let the payload carry the rule without the
+anchor. Proceeding is what the signed rule says to do; it is not a
+prediction that GO is likely.
+
+### 12.4 Pre-registered prediction for the A1/A2 stage
+
+- **A1 does not violate on repo_02-task_2.** Its `gotchas.md` line will
+  state the ≥1-day floor and name `lead_time_days`, which still exists at C3
+  (signature drift, not rename), so the note resolves textually and applies.
+  Condition (b) then fails and the verdict is NO-GO.
+- **A2 does not violate either**, reaching 0/6 and satisfying condition (a).
+- Therefore the expected verdict is **NO-GO on (b)**, driven by the
+  materials, not by the hypothesis. If A1 *does* violate on repo_02-task_2,
+  this prediction was wrong and the freshness signal has real leverage on
+  `evolved` anchors — that gets recorded as such.
+
+### 12.5 Pre-commitment on the §7 grey-zone expansion
+
+§7 permits **one** expansion to 3 tasks per repo. Committed in advance:
+
+- Take it **only** if the drift comparison misses by one run *in the
+  hypothesis's direction* (A2 below A1 but not strictly enough to read, or a
+  tie with A1 having violated at least once).
+- **Do not take it** if A1 violates 0/4 in drift. That is §11.2 confirmed —
+  a materials problem, not a power problem — and §0 says fix the design, not
+  buy more n. The answer there is `goals/MEMORY_MISDIRECTION_GOAL.md`,
+  written before these numbers existed.
+
+### 12.6 Observations recorded, not gating
+
+- **The §5 prediction failed in its ordering.** repo_01, called "most
+  likely", did not violate — consistent with the §11.3 downgrade, which
+  argued the shipped `parse_timeout` is already total so the minimal edit
+  preserves the invariant without knowing it. repo_03, called "least
+  likely", also did not violate, as predicted. The violation landed on
+  repo_02, called "intermediate".
+- **`git archaeology` is 0/6.** No A0 run dug through history; every run
+  read the file and edited it. A0 is therefore measuring "unaided local
+  reasoning", not "grep and `git log` archaeology". Relevant to how the arm
+  is described in the thesis, and it weakens the buried-C2-commit fix of the
+  generator redesign, which nothing exercised.
+- False confidence 0/6 and cap exhaustion 0/6, as expected for an arm with
+  no memory material.
+
+---
+
+## 13. A1/A2 stage: result, verdict, and the retrieval defect
+
+Ran 2026-08-31 15:50:44 -0300, CLI 2.1.251, `claude-fable-5`, isolation per
+§8. Six capture sessions + twelve runs, $9.66; $11.97 for pilot 2 including
+the probe. No infrastructure failure. The six A0 runs were reused, not
+re-executed (`18 runs (6 done, 12 pending)`), and all six captures were
+usable.
+
+### 13.1 Result
+
+| Arm | All | Drift | fix_pass | False confidence |
+|---|---|---|---|---|
+| A0 | 1/6 | 1/4 | 6/6 | 0 |
+| A1 | 0/6 | 0/4 | 6/6 | 0 |
+| A2 | 0/6 | 0/4 | 6/6 | 0 |
+
+Against `go-no-go.md` §7: condition (a) **holds** (A2 0/6 strictly below A0
+1/6). Condition (b) **fails** — A2 and A1 tie at 0/4 in drift. §7 makes that
+a NO-GO disjunct.
+
+### 13.2 Decision: NO-GO, no expansion
+
+§7 permits one expansion to 3 tasks per repo on a tie. **It is not taken**,
+per the §12.5 pre-commitment, which fires exactly here: A1 violated 0/4 in
+drift, so the tie is §11.2 confirmed — a materials problem, not a power
+problem — and §0 says fix the design rather than buy more n. §7: "si sigue
+gris, es NO-GO." The verdict is **NO-GO**.
+
+The §12.4 prediction was confirmed in full, mechanism included: A1's
+`gotchas.md` line for repo_02 reads "MUST return >= 1 … the trailing
+`days.max(1)` clamp enforces this — keep it as the last step", it names
+`lead_time_days`, which survives the signature drift, and A1 applied it.
+Recorded as pre-registered evidence, not as post-hoc explanation.
+
+### 13.3 The finding that outranks the verdict: recall cannot retrieve an orphaned memory
+
+In repo_03 (rename drift) A2 called `recall` on `src/billing.rs`,
+`issue_number`, `NEXT_INVOICE` and `format_invoice`. **Every call returned
+`count: 0`.** It never queried `render_invoice`, the dead name, and had no
+way to know it. The orphaned memory was never retrieved, so the freshness
+classifier never ran on it: A2 solved repo_03 without its memory. The one
+repo built to exercise `orphaned` + re-anchor candidates exercised nothing.
+
+The cause is in the product, not the materials. `scope_matches`
+(`src/mcp.rs:611-616`) is exact string equality on the stored scope:
+
+```rust
+Scope::File(p) => p == target,
+Scope::Symbol(s) => s == target,
+```
+
+A memory anchored to a symbol is therefore invisible to a file-scoped
+query, and after a rename it is invisible to every name an agent can know.
+Confirmed in repo_02 as well: `recall("src/logistics.rs")` returned
+`count: 0` while `recall("lead_time_days")` returned the memory — it worked
+only because the signature drift left the *name* intact.
+
+Stated plainly: **retrieval succeeds exactly when the anchor name is
+unchanged, which is exactly when freshness classification has nothing to
+contribute.** The layer the thesis is about sits behind a lookup that fails
+first. This is a defect of the system under test, uncovered by the
+experiment, and it is prior to the B2 materials problem: even perfect
+materials could not have measured the freshness layer through this
+retrieval path.
+
+### 13.4 Other observations, not gating
+
+- `git archaeology` 0/6 in A0, as in the probe. A0 measures unaided local
+  reasoning, not `grep`/`git log` archaeology; the buried-C2-commit fix of
+  the generator redesign was never exercised by any arm.
+- A2 used the new verification window correctly in repo_02: it read the
+  anchored file *before* acting on an `evolved` recall. False confidence 0/6.
+- A0's violating fix in repo_02-task_2 was
+  `lead_time_days(route_km, priority) - credit_days as i64`, the wrong fix
+  verbatim: the subtraction bypasses the clamp. Primary passed, oracle failed.
