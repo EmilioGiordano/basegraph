@@ -706,6 +706,7 @@ mod tests {
             fqn: "vanished".into(),
             sig_hash: "0000000000000000".into(),
             shape_hash: String::new(),
+            file: String::new(),
         };
         let err = generate(&memory, &graph).expect_err("orphaned");
         assert!(
