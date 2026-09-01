@@ -2,8 +2,9 @@
 
 **Fecha:** 2026-08-31
 **Rama:** `feat/generator-redesign` (por delante de `main`)
-**Estado:** infra completa y verificada; piloto 2 en la compuerta del probe A0,
-sin ejecutar todavía.
+**Estado:** piloto 2 corrido y cerrado — **NO-GO**, sin ampliación. Defecto de
+retrieval descubierto por el experimento y ya arreglado. Decisión abierta: cerrar
+con el negativo o re-pilotear.
 
 ---
 
@@ -31,11 +32,13 @@ brazos, scorer con veredicto GO/NO-GO.
 | Ciclo de vida | `remember` → `recall` (con frescura) → `reanchor` → `supersede` → `generate_test` |
 | MCP server | 9 tools (`map/search/context/show` + `recall/remember/reanchor/supersede/generate_test`) |
 | Infra experimento | Generador, runner 3 brazos, scorer |
-| Suite | **189 tests, 0 fallos**; `cargo clippy --all-targets -D warnings` limpio |
+| Suite | **206 tests, 0 fallos**; `cargo clippy --all-targets -D warnings` limpio |
 | Piloto 1 (seed 123) | Corrido — **GREY → NO ESCALAR** (0 violaciones en 18, trampas demasiado locales) |
 | Rediseño del generador (6 fixes) | Implementado y commiteado |
 | Materiales del piloto 2 (`supplementary/pilot_seed456/`) | Generados, `--verify` 45/45, generación determinista, drift visible end-to-end |
-| Probe A0 (compuerta) | Pre-registrado y enmendado; **NO ejecutado** (`results/` vacío) |
+| Probe A0 (compuerta) | Corrido: a0 1/6, drift 1/4, fix_pass 6/6 → SEGUIR |
+| Piloto 2 completo | 18 corridas, $11.97 — **NO-GO** por la condición (b); ampliación §7 **no tomada** per §12.5 |
+| Fix de retrieval (`recall`) | Implementado y verificado end-to-end contra el material del piloto |
 
 Verificado en esta sesión: `--verify` 45/45; manifest y `verify_report.json`
 regenerados salen idénticos a los commiteados; drift end-to-end
